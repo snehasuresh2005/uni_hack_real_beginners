@@ -35,22 +35,26 @@ DOMAINS = {
     "sanding_belt": {
         "name": "Abrasives > Sanding Belts",
         "attributes": ["Grit", "Length", "Width", "Material", "Pack Size", "Backing Type"],
-        "keywords": ["sanding belt", "sanding belts"]
+        "keywords": ["sanding belt", "sanding belts"],
+        "negative_keywords": ["disc", "wheel"]
     },
     "sanding_disc": {
         "name": "Abrasives > Sanding Discs",
         "attributes": ["Grit", "Diameter", "Attachment Type", "Backing Material", "Abrasive Material", "Pack Size", "Series"],
-        "keywords": ["stikit", "sanding disc", "film", "abrasive disc", "hook and loop", "psa", "abranet", "hiolit", "flap disc"]
+        "keywords": ["stikit", "sanding disc", "film", "abrasive disc", "hook and loop", "psa", "abranet", "hiolit", "flap disc"],
+        "negative_keywords": ["cut-off", "cutoff", "cutting", "grinding", "belt"]
     },
     "cutoff_disc": {
         "name": "Abrasives > Cut-Off Discs",
         "attributes": ["Diameter", "Thickness", "Arbor Size", "Max RPM", "Material", "Pack Size"],
-        "keywords": ["cut-off", "cutoff", "cutting wheel", "cutting disc", "grinding disc", "metal cut", "steel demon", "speed demon"]
+        "keywords": ["cut-off", "cutoff", "cutting wheel", "cutting disc", "grinding disc", "metal cut", "steel demon", "speed demon"],
+        "negative_keywords": ["sanding", "stikit", "film", "abranet"]
     },
     "bearing": {
         "name": "Power Transmission > Bearings",
         "attributes": ["Bore Diameter", "Outer Diameter", "Width", "Seal Type", "Material", "Clearance"],
-        "keywords": ["bearing", "ball bearing", "roller bearing", "6205", "skf"]
+        "keywords": ["bearing", "ball bearing", "roller bearing", "6205", "skf"],
+        "negative_keywords": []
     },
     "dishwasher": {
         "name": "Appliances > Dishwashers",
@@ -60,7 +64,8 @@ DOMAINS = {
     "general": {
         "name": "General Industrial Products",
         "attributes": ["Size", "Material", "Color", "Weight", "Standard/Approvals"],
-        "keywords": []
+        "keywords": [],
+        "negative_keywords": []
     }
 }
 
@@ -159,7 +164,7 @@ def parse_dimension_expression(desc, domain_id):
     return result
 
 def predict_domain(desc):
-    return resolve_taxonomy(desc)[0]
+    return resolve_taxonomy(desc, use_llm=False)[0] # Use fast version for prediction
 
 def log_agent_action(cursor, product_id, agent_name, level, message):
     timestamp = datetime.now().isoformat()
@@ -186,9 +191,9 @@ def extract_regex_specs(desc, domain_id):
             attrs["Pack Size"] = (pack_match.group(1), "")
             
     elif domain_id == "sanding_disc":
-        dia_match = re.search(r'\b(\d+(?:\.\d+)?(?:/\d+)?)\s*(?:\"|in|inch|-inch)\b', desc, re.I)
-        if dia_match and "Diameter" not in attrs:
-            attrs["Diameter"] = (dia_match.group(1), "in")
+        # dia_match = re.search(r'\b(\d+(?:\.\d+)?(?:/\d+)?)\s*(?:\"|in|inch|-inch)\b', desc, re.I)
+        # if dia_match and "Diameter" not in attrs:
+        #     attrs["Diameter"] = (dia_match.group(1), "in")
             
         grit_match = re.search(r'\b([pP]\d+)\b|\b(\d+)\s*(?:Grit|grit)\b', desc)
         if grit_match:
@@ -303,45 +308,64 @@ def resolve_brand_and_manufacturer(mfg_part_num, part_desc, part_manuf, brand_na
         
     return mfr_resolved, brand_resolved
 
-def resolve_taxonomy(part_desc):
+def resolve_taxonomy(part_desc, use_llm=False, llm_provider="ollama", ollama_model="llama3"):
     desc_lower = str(part_desc or "").lower()
+    scores = {}
+    for domain_id, config in DOMAINS.items():
+        if domain_id == "general":
+            continue
+        
+        score = 0
+        for keyword in config.get("keywords", []):
+            if keyword in desc_lower:
+                score += 1
+        
+        for neg_keyword in config.get("negative_keywords", []):
+            if neg_keyword in desc_lower:
+                score -= 2 # Penalize heavily
+        
+        scores[domain_id] = score
+
+    best_domain = max(scores, key=scores.get)
+    max_score = scores[best_domain]
+
+    # Fallback to LLM if keyword-based classification is ambiguous (low score)
+    if use_llm and max_score < 2:
+        llm_domain = None
+        prompt = f"""Classify the product description into one of these categories: {list(DOMAINS.keys())}. Description: "{part_desc}". Return ONLY the category name as a single JSON string. Example: {{"category": "sanding_disc"}}"""
+
+        # Smart Fallback: Prioritize local Ollama for cost savings
+        if is_ollama_available():
+            res_text = query_ollama(prompt, ollama_model)
+            if res_text:
+                try:
+                    data = json.loads(res_text)
+                    llm_domain = data.get("category")
+                except Exception:
+                    pass # Fallback to Gemini if parsing fails and provider is Gemini
+
+        # Fallback to Gemini if Ollama is not available or failed, and Gemini is the configured provider
+        if not llm_domain and llm_provider == "gemini":
+            from backend.llm.gemini_client import query_gemini
+            res_text = query_gemini(prompt)
+            if res_text:
+                try:
+                    # Gemini might return markdown with JSON
+                    json_str_match = re.search(r'```json\n({.*?})\n```', res_text, re.S)
+                    if json_str_match:
+                        data = json.loads(json_str_match.group(1))
+                        llm_domain = data.get("category")
+                except Exception:
+                    pass # Fallback to keyword result
+
+        if llm_domain and llm_domain in DOMAINS:
+            best_domain = llm_domain
+
+    if max_score > 0:
+        domain_info = DOMAINS[best_domain]
+        return best_domain, domain_info["name"], domain_info["name"]
     
-    if "sanding belt" in desc_lower or "sanding belts" in desc_lower:
-        return (
-            "sanding_belt", 
-            "Abrasives & Abrasive Products > Sanding Belts & Accessories > Sanding Belts",
-            "Abrasives > Sanding Belts"
-        )
-    elif ("stikit" in desc_lower or "film" in desc_lower or "sanding disc" in desc_lower or "abrasive disc" in desc_lower or "hook and loop" in desc_lower or "psa" in desc_lower or "abranet" in desc_lower or "hiolit" in desc_lower or "sanding belt" in desc_lower) and not ("cut-off" in desc_lower or "cut off" in desc_lower or "cutoff" in desc_lower or "cutting" in desc_lower or "grinding" in desc_lower):
-        return (
-            "sanding_disc",
-            "Abrasives & Abrasive Products > Sanding Discs & Accessories > Sanding Discs",
-            "Abrasives > Sanding Discs"
-        )
-    elif "cut-off" in desc_lower or "cut off" in desc_lower or "cutoff" in desc_lower or "cutting wheel" in desc_lower or "cutting disc" in desc_lower or "grinding disc" in desc_lower or "cut off wheel" in desc_lower or "cut and grind" in desc_lower or "cut n grind" in desc_lower or "cut & grind" in desc_lower or "grind disc" in desc_lower or "grinding wheel" in desc_lower:
-        return (
-            "cutoff_disc", 
-            "Abrasives & Abrasive Products > Cutting & Grinding Wheels > Cut-Off Discs",
-            "Abrasives > Cut-Off Discs"
-        )
-    elif "ball bearing" in desc_lower or "roller bearing" in desc_lower or "bearing" in desc_lower:
-        return (
-            "bearing", 
-            "Power Transmission > Mechanical Power Transmission > Bearings",
-            "Power Transmission > Bearings"
-        )
-    elif "dishwasher" in desc_lower or "dish washer" in desc_lower:
-        return (
-            "dishwasher", 
-            "Appliances & Consumer Electronics > Kitchen Appliances > Built-In Dishwashers",
-            "Appliances > Dishwashers"
-        )
-    
-    return (
-        "general", 
-        "General Industrial Products",
-        "General Industrial Products"
-    )
+    return "general", "General Industrial Products", "General Industrial Products"
 
 def validate_semantic_consistency(product_id, domain_id, resolved_mfr, resolved_brd, classpath, attributes, raw_desc):
     desc_lower = str(raw_desc or "").lower()
@@ -650,26 +674,10 @@ def validate_row(row):
         
     return errors
 
-def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ollama_model="llama3"):
+def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ollama_model="llama3", llm_budget=None):
     conn = get_db_connection()
     conn.execute("BEGIN IMMEDIATE")
     cursor = conn.cursor()
-    
-    try:
-        cursor.execute("ALTER TABLE products ADD COLUMN fingerprint TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE products ADD COLUMN difficulty_level TEXT")
-        cursor.execute("ALTER TABLE products ADD COLUMN difficulty_score REAL")
-        cursor.execute("ALTER TABLE products ADD COLUMN difficulty_reasons TEXT")
-    except Exception:
-        pass
-    try:
-        cursor.execute("ALTER TABLE products ADD COLUMN resolved_manufacturer TEXT")
-        cursor.execute("ALTER TABLE products ADD COLUMN resolved_brand TEXT")
-    except Exception:
-        pass
     
     product = cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
     if not product:
@@ -754,7 +762,15 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     log_agent_action(cursor, product_id, "System", "INFO", f"Difficulty classified as {level} (Score: {score}). Reasons: {reasons_str or 'None'}")
     
     # Phase 5: Taxonomy Core INDIVIDUAL Resolution
-    domain_id, classpath, category_name = resolve_taxonomy(part_desc)
+    domain_id, classpath, category_name = resolve_taxonomy(
+        part_desc,
+        # Semantic extraction below can resolve genuinely incomplete records.  Do
+        # not spend a separate request on taxonomy when deterministic routing is
+        # sufficient for this bounded domain catalog.
+        use_llm=False,
+        llm_provider=llm_provider,
+        ollama_model=ollama_model
+    )
     log_agent_action(cursor, product_id, "System", "SUCCESS", f"Categorized taxonomy: {classpath}")
     
     # Phase 6: Attribute Extraction & Normalization
@@ -766,12 +782,24 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     
     regex_attrs = extract_regex_specs(part_desc, domain_id)
     
-    # Ollama execution check
-    use_llm = (level == "HARD") and should_use_llm({"task_type": "semantic_spec_extraction"})
+    # Use AI only when deterministic extraction has poor coverage.  HARD alone is
+    # not a reason to call a model: missing brand/manufacturer is often resolved by
+    # normalization rather than generation.
+    regex_coverage = len(set(regex_attrs).intersection(attributes_to_extract)) / max(1, len(attributes_to_extract))
+    use_llm = (
+        level == "HARD"
+        and regex_coverage < 0.5
+        and should_use_llm({"task_type": "semantic_spec_extraction"})
+    )
     llm_worked = False
     
-    if use_llm and llm_provider == "ollama":
-        if is_ollama_available():
+    if use_llm:
+        if llm_budget is not None and not llm_budget.reserve():
+            use_llm = False
+            log_agent_action(cursor, product_id, "System", "INFO", "LLM budget exhausted; routed to deterministic extraction/HITL.")
+
+    if use_llm:
+        if is_ollama_available(): # Prioritize local Ollama for cost savings
             log_agent_action(cursor, product_id, "System", "INFO", f"Contacting local Ollama model ({ollama_model}) for spec extraction...")
             prompt = f"""
             Analyze this product:
@@ -812,8 +840,44 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
                 except Exception as e:
                     print("Failed parsing Ollama JSON:", e)
         else:
-            log_agent_action(cursor, product_id, "System", "WARNING", "Ollama offline. Falling back to deterministic rules.")
+            log_agent_action(cursor, product_id, "System", "WARNING", "Ollama offline. Falling back to next provider or rules.")
+
+        # Fallback to Gemini if Ollama was not available/failed and Gemini is the configured provider
+        if not llm_worked and llm_provider == "gemini":
+            from backend.llm.gemini_client import query_gemini
+            log_agent_action(cursor, product_id, "System", "INFO", "Contacting Gemini API for spec extraction...")
+            prompt = f"""
+            Analyze this product:
+            - MPN: {mfg_part_num}
+            - Brand: {norm_brd}
+            - Description: {part_desc}
             
+            Return spec list for attributes: {attributes_to_extract}.
+            Format ONLY as a JSON array of objects inside a markdown block:
+            ```json
+            [{{"attribute": "Name", "value": "val", "uom": "unit", "confidence": 0.9}}]
+            ```
+            """
+            res_text = query_gemini(prompt)
+            if res_text:
+                try:
+                    json_str_match = re.search(r'```json\n(\[.*?\])\n```', res_text, re.S)
+                    if json_str_match:
+                        data = json.loads(json_str_match.group(1))
+                        if isinstance(data, list):
+                            for item in data:
+                                # (Same normalization logic as Ollama path)
+                                extracted_data.append({
+                                    "attribute": item.get("attribute"), "value": normalize_attribute_value(normalize_fraction(item.get("value"))),
+                                    "uom": normalize_uom(item.get("uom")), "confidence": float(item.get("confidence", 0.85)),
+                                    "source": "Gemini API", "citation": "Extracted via LLM"
+                                })
+                            llm_worked = True
+                            log_llm_call(product_id, "HARD B2B product semantic extraction", "gemini-1.5-flash", len(prompt), res_text)
+                            log_agent_action(cursor, product_id, "System", "SUCCESS", "Gemini API extraction completed.")
+                except Exception as e:
+                    print("Failed parsing Gemini JSON:", e)
+
     # Deterministic regex backfill
     extracted_names = {item["attribute"] for item in extracted_data}
     for attr in attributes_to_extract:
@@ -989,17 +1053,21 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     conn.close()
     return True
 
-def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama3", limit=10):
+def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama3", limit=10, llm_call_budget=50):
+    from backend.llm.budget import LlmBudget
+    llm_budget = LlmBudget(llm_call_budget)
     conn = get_db_connection()
     cursor = conn.cursor()
     pending = cursor.execute("SELECT id FROM products WHERE status = 'pending' LIMIT ?", (limit,)).fetchall()
     conn.close()
     
-    max_workers = 2 if llm_provider == "ollama" else 15
+    # Cap cloud parallelism to avoid rate-limit retries; local inference has a
+    # lower cap because multiple generations compete for the same machine.
+    max_workers = 2 if llm_provider == "ollama" else 5
     count = 0
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(run_pipeline_for_product, row["id"], api_key, llm_provider, ollama_model)
+            executor.submit(run_pipeline_for_product, row["id"], api_key, llm_provider, ollama_model, llm_budget)
             for row in pending
         ]
         for future in futures:
@@ -1009,8 +1077,10 @@ def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama
             except Exception as e:
                 print("Error in parallel product enrichment:", e)
                 
-    # Generate enrichment trace trace file
-    try:
+    # Full trace exports are expensive and duplicate database audit records. They
+    # are opt-in for troubleshooting only.
+    if os.environ.get("WRITE_ENRICHMENT_TRACE", "false").lower() == "true":
+      try:
         conn = get_db_connection()
         cursor = conn.cursor()
         logs = cursor.execute("SELECT * FROM agent_logs ORDER BY product_id, id").fetchall()
@@ -1024,7 +1094,7 @@ def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama
             for l in logs:
                 writer.writerow([l["product_id"], l["timestamp"], l["agent_name"], l["level"], l["message"]])
         print(f"Enrichment trace written to {trace_path}")
-    except Exception as ex:
-        print("Failed to write enrichment trace:", ex)
+      except Exception as ex:
+          print("Failed to write enrichment trace:", ex)
         
     return count

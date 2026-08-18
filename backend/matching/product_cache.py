@@ -3,12 +3,18 @@ from backend.database import get_db_connection
 from backend.preprocessing.cleaner import normalize_manufacturer, normalize_brand, clean_text
 
 def compute_fingerprint(manufacturer, brand, mpn, part_desc):
+    """Return a reusable semantic cache key.
+
+    MPN is intentionally excluded: it is a catalog identifier, while this cache is
+    for identical normalized product content across supplier feeds.  The exact
+    description remains part of the key, so variants with different dimensions do
+    not share extracted attributes.
+    """
     m = normalize_manufacturer(manufacturer).lower()
     b = normalize_brand(brand).lower()
-    p = str(mpn).strip().lower()
     d = clean_text(part_desc).lower()
-    
-    raw = f"{m}|{b}|{p}|{d}"
+
+    raw = f"v2|{m}|{b}|{d}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 def find_cached_product(fingerprint, cursor=None):
@@ -19,14 +25,6 @@ def find_cached_product(fingerprint, cursor=None):
         own_conn = True
         
     try:
-        # Ensure fingerprint column exists
-        try:
-            cursor.execute("ALTER TABLE products ADD COLUMN fingerprint TEXT")
-            if own_conn:
-                cursor.connection.commit()
-        except Exception:
-            pass
-            
         p = cursor.execute("SELECT * FROM products WHERE fingerprint = ? AND status = 'completed' LIMIT 1", (fingerprint,)).fetchone()
         if not p:
             return None
@@ -46,11 +44,6 @@ def save_fingerprint(product_id, fingerprint, cursor=None):
         own_conn = True
         
     try:
-        try:
-            cursor.execute("ALTER TABLE products ADD COLUMN fingerprint TEXT")
-        except Exception:
-            pass
-            
         cursor.execute("UPDATE products SET fingerprint = ? WHERE id = ?", (fingerprint, product_id))
         if own_conn:
             cursor.connection.commit()

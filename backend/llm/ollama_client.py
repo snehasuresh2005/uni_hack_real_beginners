@@ -37,7 +37,8 @@ def log_llm_call(product_id, reason_for_llm_call, model, input_size, output, con
             """INSERT INTO llm_calls 
             (product_id, reason_for_llm_call, model, timestamp, input_size, output, confidence) 
             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (product_id, reason_for_llm_call, model, now, input_size, str(output), confidence)
+                # Preserve enough for audit/debugging without storing every full response.
+                (product_id, reason_for_llm_call, model, now, input_size, str(output)[:1000], confidence)
         )
         conn.commit()
     except Exception as e:
@@ -68,7 +69,8 @@ def query_ollama(prompt, model_name="llama3"):
         "model": model_name,
         "prompt": prompt,
         "stream": False,
-        "format": "json"
+        "format": "json",
+        "options": {"num_predict": int(os.environ.get("LLM_MAX_OUTPUT_TOKENS", "256"))}
     }
     try:
         req = urllib.request.Request(

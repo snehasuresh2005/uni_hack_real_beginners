@@ -23,11 +23,23 @@ def check_duplicate(product_id, mfg_part_num, part_desc, part_manuf, brand_name,
         own_conn = True
         
     try:
-        # Load other completed/flagged products
-        others = cursor.execute(
-            "SELECT id, mfg_part_num, part_desc, part_manuf, e1_brand, unilog_brand, dib_brand FROM products WHERE id != ? AND status IN ('completed', 'flagged_hitl')",
-            (product_id,)
-        ).fetchall()
+        # A valid MPN is a strong identity boundary.  Looking up only matching MPNs
+        # uses the database index and avoids an O(n^2) scan during bulk processing.
+        mpn = str(mfg_part_num or "").strip()
+        if mpn and mpn.lower() != "nan":
+            others = cursor.execute(
+                "SELECT id, mfg_part_num, part_desc, part_manuf, e1_brand, unilog_brand, dib_brand "
+                "FROM products WHERE id != ? AND mfg_part_num = ? AND status IN ('completed', 'flagged_hitl')",
+                (product_id, mpn)
+            ).fetchall()
+        else:
+            # Missing-MPN records cannot be cheaply proven distinct; bound the
+            # fuzzy candidate set to protect batch throughput.
+            others = cursor.execute(
+                "SELECT id, mfg_part_num, part_desc, part_manuf, e1_brand, unilog_brand, dib_brand "
+                "FROM products WHERE id != ? AND status IN ('completed', 'flagged_hitl') ORDER BY id DESC LIMIT 200",
+                (product_id,)
+            ).fetchall()
     finally:
         if own_conn:
             cursor.connection.close()

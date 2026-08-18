@@ -31,6 +31,7 @@ class ConnectionSettings(BaseModel):
     llm_provider: str
     gemini_api_key: Optional[str] = ""
     ollama_model: Optional[str] = "llama3"
+    llm_call_budget: int = 50
 
 class IngestBatchRequest(BaseModel):
     products: List[dict]
@@ -43,7 +44,8 @@ def load_settings():
     defaults = {
         "llm_provider": os.environ.get("LLM_PROVIDER", "gemini"),
         "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
-        "ollama_model": os.environ.get("OLLAMA_MODEL", "llama3")
+        "ollama_model": os.environ.get("OLLAMA_MODEL", "llama3"),
+        "llm_call_budget": int(os.environ.get("LLM_CALL_BUDGET", "50"))
     }
     if os.path.exists(SETTINGS_PATH):
         try:
@@ -166,7 +168,7 @@ def trigger_enrichment(product_id: int, background_tasks: BackgroundTasks):
     return {"status": "processing", "message": f"Enrichment pipeline started ({provider})"}
 
 @app.post("/api/run-bulk")
-def run_bulk(background_tasks: BackgroundTasks, limit: int = 10):
+def run_bulk(background_tasks: BackgroundTasks, limit: int = 10, llm_call_budget: Optional[int] = None):
     global IS_BULK_RUNNING
     if IS_BULK_RUNNING:
         raise HTTPException(status_code=400, detail="A bulk enrichment task is already running in the background.")
@@ -174,17 +176,18 @@ def run_bulk(background_tasks: BackgroundTasks, limit: int = 10):
     key = SETTINGS.get("gemini_api_key")
     provider = SETTINGS.get("llm_provider", "gemini")
     model = SETTINGS.get("ollama_model", "llama3")
+    budget = SETTINGS.get("llm_call_budget", 50) if llm_call_budget is None else llm_call_budget
     
     def bulk_wrapper():
         global IS_BULK_RUNNING
         try:
-            run_bulk_enrichment(key, provider, model, limit)
+            run_bulk_enrichment(key, provider, model, limit, budget)
         finally:
             IS_BULK_RUNNING = False
             
     IS_BULK_RUNNING = True
     background_tasks.add_task(bulk_wrapper)
-    return {"status": "processing", "message": f"Bulk enrichment for up to {limit} products started in the background ({provider})"}
+    return {"status": "processing", "message": f"Bulk enrichment for up to {limit} products started with an LLM budget of {budget} ({provider})"}
 
 class ResolveConflictRequest(BaseModel):
     conflict_id: int
@@ -390,10 +393,12 @@ def update_settings(settings: ConnectionSettings):
     SETTINGS["llm_provider"] = settings.llm_provider
     SETTINGS["gemini_api_key"] = settings.gemini_api_key
     SETTINGS["ollama_model"] = settings.ollama_model
+    SETTINGS["llm_call_budget"] = max(0, settings.llm_call_budget)
     
     os.environ["LLM_PROVIDER"] = settings.llm_provider
     os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
     os.environ["OLLAMA_MODEL"] = settings.ollama_model
+    os.environ["LLM_CALL_BUDGET"] = str(SETTINGS["llm_call_budget"])
     
     save_settings(SETTINGS)
     return {"status": "success", "message": "Settings updated"}
@@ -403,7 +408,8 @@ def get_settings():
     return {
         "llm_provider": SETTINGS.get("llm_provider", "gemini"),
         "gemini_api_key": SETTINGS.get("gemini_api_key", ""),
-        "ollama_model": SETTINGS.get("ollama_model", "llama3")
+        "ollama_model": SETTINGS.get("ollama_model", "llama3"),
+        "llm_call_budget": SETTINGS.get("llm_call_budget", 50)
     }
 
 @app.post("/api/profile")
