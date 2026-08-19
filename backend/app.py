@@ -86,7 +86,8 @@ def get_stats():
         "processing": processing,
         "flagged_hitl": flagged,
         "completed": completed,
-        "avg_confidence": round(avg_conf * 100, 1)
+        "avg_confidence": round(avg_conf * 100, 1),
+        "is_bulk_running": IS_BULK_RUNNING
     }
 
 @app.get("/api/products")
@@ -248,6 +249,9 @@ class UpdateAttributesRequest(BaseModel):
     short_desc: Optional[str] = None
     long_desc: Optional[str] = None
     classpath: Optional[str] = None
+    resolved_manufacturer: Optional[str] = None
+    resolved_brand: Optional[str] = None
+    category: Optional[str] = None
 
 @app.post("/api/products/{product_id}/update-attributes")
 def update_attributes(product_id: int, req: UpdateAttributesRequest):
@@ -277,9 +281,11 @@ def update_attributes(product_id: int, req: UpdateAttributesRequest):
     cursor.execute(
         """UPDATE products 
         SET invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?, classpath = ?,
+            resolved_manufacturer = ?, resolved_brand = ?, category = ?,
             status = 'completed', confidence_score = 1.0 
         WHERE id = ?""",
-        (req.invoice_desc, req.mobile_desc, req.short_desc, req.long_desc, req.classpath, product_id)
+        (req.invoice_desc, req.mobile_desc, req.short_desc, req.long_desc, req.classpath,
+         req.resolved_manufacturer, req.resolved_brand, req.category, product_id)
     )
     
     # Clear conflicts
@@ -289,6 +295,181 @@ def update_attributes(product_id: int, req: UpdateAttributesRequest):
     conn.close()
     
     return {"status": "success", "message": "Attributes updated and product set to completed"}
+
+def query_ollama_ai_assist(prompt: str, model: str = "llama3") -> str:
+    """Dedicated Ollama query for AI Assist with higher token budget."""
+    import urllib.request, json, os
+    url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "format": "json",
+        "options": {"num_predict": 2048, "temperature": 0.1}
+    }
+    try:
+        req = urllib.request.Request(
+            f"{url}/api/generate",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}
+        )
+        with urllib.request.urlopen(req, timeout=120) as response:
+            res_data = json.loads(response.read().decode("utf-8"))
+            return res_data.get("response", "").strip()
+    except Exception as e:
+        print(f"Ollama AI assist query failed: {e}")
+        return None
+
+@app.post("/api/products/{product_id}/ai-assist")
+def ai_assist_product(product_id: int):
+    # Fetch product info
+    conn = get_db_connection()
+    product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    if not product:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    attributes = conn.execute("SELECT * FROM attributes WHERE product_id = ?", (product_id,)).fetchall()
+    logs = conn.execute("SELECT * FROM agent_logs WHERE product_id = ? ORDER BY id DESC", (product_id,)).fetchall()
+    conn.close()
+    
+    warning_logs = [l["message"] for l in logs if l["level"] == "WARNING"]
+    warning_str = "; ".join(warning_logs) if warning_logs else "None"
+
+    # Construct attributes string
+    attr_list = [f"{a['label']}: {a['value']} {a['uom'] or ''}" for a in attributes]
+    attrs_str = ", ".join(attr_list) if attr_list else "None"
+
+    prompt = f"""You are an AI data enrichment assistant for B2B industrial product catalogs.
+Analyze this product and return COMPLETE enrichment data as JSON. You MUST always return valid JSON.
+
+Product Data:
+- MPN (Part Number): {product['mfg_part_num']}
+- Raw Manufacturer: {product['part_manuf']}
+- E1 Brand: {product['e1_brand']}
+- Unilog Brand: {product['unilog_brand']}
+- DIB Brand: {product['dib_brand']}
+- Raw Description: {product['part_desc']}
+- Flagged Warnings: {warning_str}
+- Current Resolved Manufacturer: {product['resolved_manufacturer'] or 'UNKNOWN'}
+- Current Resolved Brand: {product['resolved_brand'] or 'UNKNOWN'}
+- Current Classpath: {product['classpath'] or 'UNKNOWN'}
+- Current Attributes: {attrs_str}
+
+TASK: Resolve ALL unknown/missing fields. Use your knowledge of industrial products to identify the brand, manufacturer, category, and specifications from the MPN and description.
+
+Rules:
+1. resolved_brand: Identify the true brand from MPN prefix patterns, description keywords, or manufacturer name.
+2. resolved_manufacturer: Full legal manufacturer name, cleaned.
+3. classpath: Format as "Category>Subcategory" (e.g. "Abrasives>Sanding Discs", "Building Materials>Mortar & Grout").
+4. invoice_desc: Max 40 chars, ALL CAPS (e.g. "MIRKA HIOLIT 5IN P80 DISC").
+5. mobile_desc: 60-80 chars B2B marketing copy with brand and key specs.
+6. short_desc: Brand + Series + MPN + product type + key specs.
+7. long_desc: 2-3 sentence professional product description.
+8. attributes: ALL measurable specifications as label/value/uom objects.
+
+Respond with ONLY a JSON object, no extra text:
+{{"resolved_brand":"...","resolved_manufacturer":"...","classpath":"...","invoice_desc":"...","mobile_desc":"...","short_desc":"...","long_desc":"...","attributes":[{{"label":"...","value":"...","uom":"..."}}]}}"""
+
+    # Use local Ollama — no API key required, fully offline
+    from backend.llm.ollama_client import is_ollama_available
+    if not is_ollama_available():
+        raise HTTPException(status_code=503, detail="Ollama is not running. Start it with: ollama serve")
+
+    ollama_model = SETTINGS.get("ollama_model", "llama3")
+    res_text = query_ollama_ai_assist(prompt, ollama_model)
+    if not res_text:
+        raise HTTPException(status_code=500, detail="Ollama returned no response. Make sure llama3 is pulled: ollama pull llama3")
+         
+    def clean_and_parse_json(text):
+        t = text.strip()
+        
+        # 1. Try direct parsing
+        try:
+            return json.loads(t)
+        except Exception:
+            pass
+            
+        # 2. Extract content from code blocks
+        import re
+        match = re.search(r'```(?:json)?\s*(.*?)\s*(?:```|$)', t, re.S)
+        if match:
+            candidate = match.group(1).strip()
+            try:
+                return json.loads(candidate)
+            except Exception:
+                t = candidate
+                
+        # 3. Repair truncated JSON by balancing braces/brackets
+        first_brace = t.find('{')
+        if first_brace != -1:
+            t = t[first_brace:]
+            
+        stack = []
+        in_string = False
+        escape = False
+        clean_chars = []
+        
+        for char in t:
+            if escape:
+                clean_chars.append(char)
+                escape = False
+                continue
+            if char == '\\':
+                clean_chars.append(char)
+                escape = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                clean_chars.append(char)
+                continue
+                
+            clean_chars.append(char)
+            
+            if not in_string:
+                if char in ('{', '['):
+                    stack.append(char)
+                elif char in ('}', ']'):
+                    if stack:
+                        if (char == '}' and stack[-1] == '{') or (char == ']' and stack[-1] == '['):
+                            stack.pop()
+                            
+        cleaned_text = "".join(clean_chars)
+        
+        if in_string:
+            cleaned_text += '"'
+            
+        while stack:
+            open_char = stack.pop()
+            if open_char == '{':
+                cleaned_text = cleaned_text.rstrip().rstrip(',')
+                cleaned_text += '}'
+            elif open_char == '[':
+                cleaned_text = cleaned_text.rstrip().rstrip(',')
+                cleaned_text += ']'
+                
+        try:
+            return json.loads(cleaned_text)
+        except Exception as e:
+            print("Robust JSON parser failed to recover JSON. Attempting regex extract. Error:", e)
+            fallback_dict = {}
+            for key in ["resolved_brand", "resolved_manufacturer", "classpath", "invoice_desc", "mobile_desc", "short_desc", "long_desc"]:
+                m = re.search(rf'"{key}"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"', t)
+                if m:
+                    try:
+                        val = m.group(1).encode().decode('unicode-escape')
+                    except Exception:
+                        val = m.group(1)
+                    fallback_dict[key] = val
+            fallback_dict["attributes"] = []
+            return fallback_dict
+
+    try:
+        data = clean_and_parse_json(res_text)
+        return data
+    except Exception as e:
+        print("Failed to parse Gemini response text:", res_text, e)
+        raise HTTPException(status_code=500, detail=f"Failed to parse Gemini response as JSON: {e}")
 
 @app.post("/api/ingest")
 async def ingest_csv(file: UploadFile = File(...)):
@@ -426,6 +607,27 @@ def get_llm_logs():
     logs = cursor.execute("SELECT * FROM llm_calls ORDER BY id DESC LIMIT 50").fetchall()
     conn.close()
     return [dict(l) for l in logs]
+
+@app.get("/api/logs/stream")
+async def stream_logs():
+    from backend.logs_broker import logs_broker
+    q = logs_broker.subscribe()
+    
+    async def event_generator():
+        import asyncio
+        import json
+        loop = asyncio.get_event_loop()
+        try:
+            while True:
+                # Fetch log entries non-blockingly from the broker queue
+                log_entry = await loop.run_in_executor(None, q.get)
+                yield f"data: {json.dumps(log_entry)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            logs_broker.unsubscribe(q)
+            
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/api/evaluation")
 def run_evaluation():

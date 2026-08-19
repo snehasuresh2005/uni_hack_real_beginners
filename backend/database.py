@@ -1,15 +1,112 @@
 import sqlite3
 import os
 import json
+import queue
+import threading
+import time
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "database.db")
 
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    conn = sqlite3.connect(DB_PATH, timeout=60.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA busy_timeout = 30000;")
     return conn
+
+class DatabaseWriter:
+    """Thread-safe serialized database writer thread to queue and batch all SQLite writes."""
+    def __init__(self):
+        self.task_queue = queue.Queue()
+        self.thread = None
+        self.running = False
+        self._lock = threading.Lock()
+
+    def start(self):
+        with self._lock:
+            if not self.running:
+                self.running = True
+                self.thread = threading.Thread(target=self._drain_queue, name="DbWriterThread", daemon=True)
+                self.thread.start()
+
+    def stop(self):
+        with self._lock:
+            if self.running:
+                self.running = False
+                self.task_queue.put(None)
+                if self.thread:
+                    self.thread.join()
+
+    def execute(self, func, *args, wait=False, **kwargs):
+        """Submit a DB write operation.
+        func must be a callable accepting 'cursor' as its first argument.
+        If wait=True, blocks until write completes and returns or raises.
+        """
+        self.start()  # Lazy start on first write execution
+        task = {
+            "func": func,
+            "args": args,
+            "kwargs": kwargs,
+            "event": threading.Event() if wait else None,
+            "result": None,
+            "error": None
+        }
+        self.task_queue.put(task)
+        if wait:
+            task["event"].wait()
+            if task["error"]:
+                raise task["error"]
+            return task["result"]
+
+    def _drain_queue(self):
+        conn = sqlite3.connect(DB_PATH, timeout=60.0)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout = 30000;")
+        
+        while self.running:
+            task = self.task_queue.get()
+            if task is None:
+                break
+                
+            func = task["func"]
+            args = task["args"]
+            kwargs = task["kwargs"]
+            
+            success = False
+            for attempt in range(5):
+                try:
+                    conn.execute("BEGIN IMMEDIATE")
+                    cursor = conn.cursor()
+                    res = func(cursor, *args, **kwargs)
+                    conn.commit()
+                    task["result"] = res
+                    success = True
+                    break
+                except sqlite3.OperationalError as e:
+                    conn.rollback()
+                    if "locked" in str(e) or "busy" in str(e):
+                        time.sleep(0.05 * (2 ** attempt)) # Exponential backoff retry
+                        continue
+                    else:
+                        task["error"] = e
+                        break
+                except Exception as e:
+                    conn.rollback()
+                    task["error"] = e
+                    break
+            
+            if not success and not task["error"]:
+                task["error"] = sqlite3.OperationalError("Database lock could not be resolved after multiple write retries")
+                
+            if task["event"]:
+                task["event"].set()
+                
+        conn.close()
+
+db_writer = DatabaseWriter()
+
 
 def init_db():
     conn = get_db_connection()
@@ -107,7 +204,7 @@ def init_db():
         reason_for_llm_call TEXT,
         model TEXT,
         timestamp TEXT,
-        input_size INTEGER, # Deprecated, use prompt_token_count
+        input_size INTEGER, -- Deprecated, use prompt_token_count
         output TEXT,
         confidence REAL,
         FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE

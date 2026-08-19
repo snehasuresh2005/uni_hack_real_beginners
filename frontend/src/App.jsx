@@ -23,6 +23,120 @@ import {
   Trash2
 } from 'lucide-react';
 
+function PipelineStepTracker({ product, activePhase, isSkippedLLM }) {
+  const steps = [
+    { label: 'cache-check', short: 'C' },
+    { label: 'dedup', short: 'D' },
+    { label: 'normalize', short: 'N' },
+    { label: 'classify', short: 'Cl' },
+    { label: 'taxonomy', short: 'T' },
+    { label: 'regex', short: 'R' },
+    { label: 'LLM', short: 'L' },
+    { label: 'QA', short: 'Q' }
+  ];
+
+  const status = product.status;
+  const currentPhase = activePhase || 1;
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '6px' }}>
+      <style dangerouslySetInnerHTML={{__html: `
+        @keyframes pulse {
+          0% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.4); }
+          50% { transform: scale(1.15); opacity: 1; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2); }
+          100% { transform: scale(1); opacity: 0.8; box-shadow: 0 0 0 0 rgba(139, 92, 246, 0); }
+        }
+        .step-pulse {
+          animation: pulse 1.5s infinite ease-in-out;
+        }
+      `}} />
+      <div style={{ display: 'flex', gap: '3px' }}>
+        {steps.map((step, idx) => {
+          const stepNum = idx + 1;
+          let bg = 'rgba(255, 255, 255, 0.05)';
+          let color = 'rgba(255, 255, 255, 0.25)';
+          let isPulse = false;
+          let isSkipped = false;
+
+          if (status === 'completed') {
+            bg = 'rgba(16, 185, 129, 0.15)';
+            color = '#10b981';
+          } else if (status === 'flagged_hitl') {
+            if (stepNum === 8) {
+              bg = 'rgba(239, 68, 68, 0.15)';
+              color = '#ef4444';
+            } else {
+              bg = 'rgba(16, 185, 129, 0.15)';
+              color = '#10b981';
+            }
+          } else if (status === 'duplicate') {
+            if (stepNum <= 2) {
+              bg = 'rgba(16, 185, 129, 0.15)';
+              color = '#10b981';
+            } else {
+              bg = 'rgba(255, 255, 255, 0.02)';
+              color = 'rgba(255, 255, 255, 0.1)';
+              isSkipped = true;
+            }
+          } else if (status === 'pending') {
+            bg = 'rgba(255, 255, 255, 0.04)';
+            color = 'rgba(255, 255, 255, 0.2)';
+          } else if (status === 'processing') {
+            if (stepNum < currentPhase) {
+              if (stepNum === 7 && isSkippedLLM) {
+                bg = 'rgba(255, 255, 255, 0.02)';
+                color = 'rgba(255, 255, 255, 0.1)';
+                isSkipped = true;
+              } else {
+                bg = 'rgba(16, 185, 129, 0.15)';
+                color = '#10b981';
+              }
+            } else if (stepNum === currentPhase) {
+              bg = 'rgba(139, 92, 246, 0.2)';
+              color = '#a78bfa';
+              isPulse = true;
+            } else {
+              bg = 'rgba(255, 255, 255, 0.04)';
+              color = 'rgba(255, 255, 255, 0.2)';
+            }
+          }
+
+          return (
+            <div 
+              key={idx}
+              title={`${step.label}${isPulse ? ' (Running)' : isSkipped ? ' (Skipped)' : ''}`}
+              className={isPulse ? 'step-pulse' : ''}
+              style={{
+                width: '18px',
+                height: '18px',
+                borderRadius: '50%',
+                background: bg,
+                border: `1px solid ${color}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '8px',
+                fontWeight: 'bold',
+                color: color,
+                cursor: 'help',
+                transition: 'all 0.3s ease',
+                textDecoration: isSkipped ? 'line-through' : 'none'
+              }}
+            >
+              {step.short}
+            </div>
+          );
+        })}
+      </div>
+      {status === 'processing' && (
+        <span style={{ fontSize: '0.7rem', color: '#a78bfa', marginLeft: '4px', fontStyle: 'italic' }}>
+          {steps[currentPhase - 1]?.label}...
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard'); // dashboard, ingestion, preview, conflicts, settings
   
@@ -80,8 +194,46 @@ export default function App() {
   const [flaggedProducts, setFlaggedProducts] = useState([]);
   const [selectedConflictProduct, setSelectedConflictProduct] = useState(null);
 
+  // States for Conflicts Resolution Panel
+  const [conflictResolvedBrand, setConflictResolvedBrand] = useState('');
+  const [conflictResolvedManufacturer, setConflictResolvedManufacturer] = useState('');
+  const [conflictClasspath, setConflictClasspath] = useState('');
+  const [conflictInvoiceDesc, setConflictInvoiceDesc] = useState('');
+  const [conflictMobileDesc, setConflictMobileDesc] = useState('');
+  const [conflictShortDesc, setConflictShortDesc] = useState('');
+  const [conflictLongDesc, setConflictLongDesc] = useState('');
+  const [conflictAttributes, setConflictAttributes] = useState([]);
+
+  useEffect(() => {
+    if (selectedConflictProduct) {
+      const p = selectedConflictProduct.product;
+      setConflictResolvedBrand(p.resolved_brand || '');
+      setConflictResolvedManufacturer(p.resolved_manufacturer || '');
+      setConflictClasspath(p.classpath || '');
+      setConflictInvoiceDesc(p.invoice_desc || '');
+      setConflictMobileDesc(p.mobile_desc || '');
+      setConflictShortDesc(p.short_desc || '');
+      setConflictLongDesc(p.long_desc || '');
+      setConflictAttributes(selectedConflictProduct.attributes || []);
+    } else {
+      setConflictResolvedBrand('');
+      setConflictResolvedManufacturer('');
+      setConflictClasspath('');
+      setConflictInvoiceDesc('');
+      setConflictMobileDesc('');
+      setConflictShortDesc('');
+      setConflictLongDesc('');
+      setConflictAttributes([]);
+    }
+  }, [selectedConflictProduct]);
+
   // LLM execution logs
   const [llmLogs, setLlmLogs] = useState([]);
+
+  // SSE log stream states
+  const [agentLogs, setAgentLogs] = useState([]);
+  const [activeProductPhases, setActiveProductPhases] = useState({});
+  const [skippedLLM, setSkippedLLM] = useState({});
 
   // Connection settings
   const [connectionSettings, setConnectionSettings] = useState({
@@ -91,30 +243,104 @@ export default function App() {
   });
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState(null);
+  const [isAiAssisting, setIsAiAssisting] = useState(false);
 
-  // Poll statistics during processing
+  const currentPageRef = useRef(currentPage);
+  const searchQueryRef = useRef(searchQuery);
+  const gridFilterStatusRef = useRef(gridFilterStatus);
+
   useEffect(() => {
+    currentPageRef.current = currentPage;
+    searchQueryRef.current = searchQuery;
+    gridFilterStatusRef.current = gridFilterStatus;
+  }, [currentPage, searchQuery, gridFilterStatus]);
+
+  const refreshProductsList = async () => {
+    try {
+      let url = `/api/products?page=${currentPageRef.current}&limit=12`;
+      if (searchQueryRef.current) {
+        url += `&q=${encodeURIComponent(searchQueryRef.current)}`;
+      }
+      if (gridFilterStatusRef.current !== 'ALL') {
+        url += `&status=${gridFilterStatusRef.current.toLowerCase()}`;
+      }
+      const res = await fetch(url);
+      const data = await res.json();
+      setProducts(data.data || []);
+      setTotalProductsCount(data.total || 0);
+    } catch (err) {
+      console.error("Error refreshing products:", err);
+    }
+  };
+
+  // Connect to Server-Sent Events (SSE) stream for live updates
+  useEffect(() => {
+    let eventSource = null;
+    
+    const connectSSE = () => {
+      console.log("Connecting to SSE log stream at /api/logs/stream...");
+      eventSource = new EventSource('/api/logs/stream');
+      
+      eventSource.onmessage = (event) => {
+        try {
+          const logEntry = JSON.parse(event.data);
+          
+          // Prepend to agent logs
+          setAgentLogs(prev => [logEntry, ...prev].slice(0, 150));
+          
+          // Parse phase transitions (e.g. "Phase X/8: <label>")
+          const match = logEntry.message.match(/Phase (\d)\/8:\s*([a-zA-Z0-9_-]+)/);
+          if (match) {
+            const phaseNum = parseInt(match[1], 10);
+            const phaseLabel = match[2];
+            const pId = logEntry.product_id;
+            
+            if (phaseLabel === 'LLM' && logEntry.message.includes('Skipped')) {
+              setSkippedLLM(prev => ({ ...prev, [pId]: true }));
+            }
+            
+            setActiveProductPhases(prev => ({
+              ...prev,
+              [pId]: phaseNum
+            }));
+          }
+          
+          // Refresh products, stats, and conflicts when products transition or finish
+          if (
+            logEntry.message.includes("completed") || 
+            logEntry.message.includes("Cache hit") || 
+            logEntry.message.includes("Duplicate detected") ||
+            logEntry.message.includes("Phase 8/8")
+          ) {
+            fetchStats();
+            refreshProductsList();
+            fetchConflicts();
+          }
+        } catch (err) {
+          console.error("Error parsing SSE log entry:", err);
+        }
+      };
+      
+      eventSource.onerror = (err) => {
+        console.error("SSE Connection failed, retrying in 5 seconds...", err);
+        eventSource.close();
+        setTimeout(connectSSE, 5000);
+      };
+    };
+    
+    connectSSE();
+    
+    // Initial fetch on mount
     fetchStats();
     fetchLogs();
     fetchSettings();
-  }, []);
-
-  // Poll stats and logs every 3 seconds if items are processing
-  useEffect(() => {
-    let interval = null;
-    if (stats.processing > 0 || isBulkProcessing) {
-      interval = setInterval(() => {
-        fetchStats();
-        fetchLogs();
-        if (currentTab === 'preview') {
-          fetchProducts(currentPage);
-        }
-      }, 3000);
-    }
+    
     return () => {
-      if (interval) clearInterval(interval);
+      if (eventSource) {
+        eventSource.close();
+      }
     };
-  }, [stats.processing, isBulkProcessing, currentTab, currentPage, searchQuery, gridFilterStatus]);
+  }, []);
 
   // Load grid when tab or dependencies change
   useEffect(() => {
@@ -130,9 +356,7 @@ export default function App() {
       const res = await fetch('/api/stats');
       const data = await res.json();
       setStats(data);
-      if (data.processing === 0) {
-        setIsBulkProcessing(false);
-      }
+      setIsBulkProcessing(!!data.is_bulk_running);
 
       // Fetch all products to calculate difficulty distribution
       const pRes = await fetch('/api/products?limit=1000');
@@ -381,9 +605,15 @@ export default function App() {
     try {
       setIsBulkProcessing(true);
       const res = await fetch('/api/run-bulk?limit=50', { method: 'POST' });
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.detail || "Enrichment failed");
+      }
       fetchStats();
     } catch (err) {
+      setIsBulkProcessing(false);
       console.error("Enrichment failed:", err);
+      alert(err.message || "Enrichment failed");
     }
   };
 
@@ -457,6 +687,66 @@ export default function App() {
       }
     } catch (err) {
       console.error("Failed to resolve conflict:", err);
+    }
+  };
+
+  const handleApproveConflictProduct = async () => {
+    if (!selectedConflictProduct) return;
+    const pId = selectedConflictProduct.product.id;
+    try {
+      const res = await fetch(`/api/products/${pId}/update-attributes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attributes: conflictAttributes,
+          invoice_desc: conflictInvoiceDesc,
+          mobile_desc: conflictMobileDesc,
+          short_desc: conflictShortDesc,
+          long_desc: conflictLongDesc,
+          classpath: conflictClasspath,
+          resolved_brand: conflictResolvedBrand,
+          resolved_manufacturer: conflictResolvedManufacturer
+        })
+      });
+      if (res.ok) {
+        setSelectedConflictProduct(null);
+        fetchConflicts();
+        fetchStats();
+        fetchProducts(currentPage);
+      } else {
+        alert("Failed to resolve product conflicts");
+      }
+    } catch (err) {
+      console.error("Error resolving conflicts:", err);
+    }
+  };
+
+  const handleAiAssist = async () => {
+    if (!selectedConflictProduct) return;
+    setIsAiAssisting(true);
+    try {
+      const res = await fetch(`/api/products/${selectedConflictProduct.product.id}/ai-assist`, {
+        method: 'POST'
+      });
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(errData.detail || "AI Assist request failed. Please check your Gemini API key in settings.");
+        return;
+      }
+      const data = await res.json();
+      if (data.resolved_brand) setConflictResolvedBrand(data.resolved_brand);
+      if (data.resolved_manufacturer) setConflictResolvedManufacturer(data.resolved_manufacturer);
+      if (data.classpath) setConflictClasspath(data.classpath);
+      if (data.invoice_desc) setConflictInvoiceDesc(data.invoice_desc);
+      if (data.mobile_desc) setConflictMobileDesc(data.mobile_desc);
+      if (data.short_desc) setConflictShortDesc(data.short_desc);
+      if (data.long_desc) setConflictLongDesc(data.long_desc);
+      if (data.attributes) setConflictAttributes(data.attributes);
+    } catch (err) {
+      console.error("Failed running AI Assist:", err);
+      alert("Error connecting to AI Assist API endpoint");
+    } finally {
+      setIsAiAssisting(false);
     }
   };
 
@@ -686,19 +976,27 @@ export default function App() {
                 <div className="terminal-title">Active Ingestion & Extraction Log Stream</div>
                 <TerminalIcon size={14} color="var(--text-dark)" />
               </div>
-              <div className="terminal-body">
-                {llmLogs.length === 0 ? (
+              <div className="terminal-body" style={{ maxHeight: '300px', overflowY: 'auto' }}>
+                {agentLogs.length === 0 ? (
                   <div style={{ color: 'var(--text-dark)', padding: '10px', textAlign: 'center' }}>Awaiting pipeline execution. Logs will appear here dynamically.</div>
                 ) : (
-                  llmLogs.map((log, index) => (
-                    <div key={index} className="log-line">
-                      <span className="log-time">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
-                      <span className="log-agent">{log.model_name}</span>
-                      <span className="log-msg" style={{ color: log.status_code >= 400 ? 'var(--danger)' : '#fff' }}>
-                        {log.prompt_purpose} &rarr; Status {log.status_code || 200}
-                      </span>
-                    </div>
-                  ))
+                  agentLogs.map((log, index) => {
+                    let levelColor = '#fff';
+                    if (log.level === 'SUCCESS') levelColor = 'var(--success)';
+                    else if (log.level === 'WARNING') levelColor = 'var(--warning)';
+                    else if (log.level === 'ERROR') levelColor = 'var(--danger)';
+                    else if (log.level === 'INFO') levelColor = 'var(--primary-hover)';
+                    
+                    return (
+                      <div key={index} className="log-line" style={{ display: 'flex', gap: '8px', fontSize: '0.8rem', marginBottom: '4px', fontFamily: 'monospace' }}>
+                        <span className="log-time" style={{ color: 'var(--text-dark)', minWidth: '75px' }}>[{new Date(log.timestamp).toLocaleTimeString()}]</span>
+                        <span className="log-agent" style={{ color: 'var(--secondary)', fontWeight: 'bold', minWidth: '95px', display: 'inline-block' }}>{log.agent_name}</span>
+                        <span className="log-msg" style={{ color: levelColor }}>
+                          {log.message}
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -839,9 +1137,16 @@ export default function App() {
                         <td style={{ fontSize: '0.8rem', color: '#fff' }}>{p.classpath || <span style={{ color: 'var(--text-dark)' }}>N/A</span>}</td>
                         <td style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{p.part_desc}</td>
                         <td>
-                          <span className={`badge badge-${p.status === 'flagged_hitl' ? 'flagged' : p.status}`}>
-                            {p.status === 'flagged_hitl' ? 'HITL Review' : p.status}
-                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                            <span className={`badge badge-${p.status === 'flagged_hitl' ? 'flagged' : p.status}`} style={{ width: 'fit-content' }}>
+                              {p.status === 'flagged_hitl' ? 'HITL Review' : p.status}
+                            </span>
+                            <PipelineStepTracker 
+                              product={p} 
+                              activePhase={activeProductPhases[p.id]} 
+                              isSkippedLLM={skippedLLM[p.id]} 
+                            />
+                          </div>
                         </td>
                         <td style={{ textAlign: 'right' }}>
                           <button className="btn btn-secondary" style={{ padding: '6px 10px', fontSize: '0.75rem' }} onClick={() => openEditModal(p)}>
@@ -921,60 +1226,306 @@ export default function App() {
 
               <div className="glass-panel" style={{ margin: 0 }}>
                 {selectedConflictProduct ? (
-                  <div>
-                    <h3 style={{ fontSize: '1.1rem', color: 'var(--text-main)', marginBottom: '16px' }}>Conflict Resolution Detail: {selectedConflictProduct.product.mfg_part_num}</h3>
-                    
-                    <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '20px' }}>
-                      <strong>Description:</strong> {selectedConflictProduct.product.part_desc}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '80vh', overflowY: 'auto', paddingRight: '8px' }}>
+                    <div>
+                      <h3 style={{ fontSize: '1.1rem', color: 'var(--text-main)', marginBottom: '4px' }}>Conflict Resolution Detail: {selectedConflictProduct.product.mfg_part_num}</h3>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                        <strong>Raw Product Description:</strong> {selectedConflictProduct.product.part_desc}
+                      </div>
                     </div>
 
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-                      {selectedConflictProduct.conflicts.map(c => (
-                        <div key={c.id} style={{ border: '1px solid var(--border-glass)', borderRadius: '8px', padding: '16px', background: 'rgba(0,0,0,0.1)' }}>
-                          <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--danger)', textTransform: 'uppercase' }}>
-                            Conflicting Attribute: {c.field_name}
-                          </span>
-                          
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginTop: '12px' }}>
-                            <div 
-                              onClick={() => handleResolveConflict(selectedConflictProduct.product.id, c.id, c.value_a)}
-                              style={{ border: '1px dashed var(--border-glass)', padding: '12px', borderRadius: '6px', cursor: 'pointer', textAlign: 'center' }}
-                            >
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Source: {c.agent_a}</div>
-                              <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--success)', marginTop: '4px' }}>{c.value_a || "NaN"}</div>
-                            </div>
-                            <div 
-                              onClick={() => handleResolveConflict(selectedConflictProduct.product.id, c.id, c.value_b)}
-                              style={{ border: '1px dashed var(--border-glass)', padding: '12px', borderRadius: '6px', cursor: 'pointer', textAlign: 'center' }}
-                            >
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Source: {c.agent_b}</div>
-                              <div style={{ fontSize: '0.95rem', fontWeight: '700', color: 'var(--success)', marginTop: '4px' }}>{c.value_b || "NaN"}</div>
-                            </div>
+                    {/* Checkpoint Badge & Flagged Warning Info */}
+                    {(() => {
+                      const warningLog = selectedConflictProduct.logs?.find(l => l.level === 'WARNING');
+                      const isTaxonomyConflict = warningLog?.message?.toLowerCase().includes('taxonomy') || 
+                                                 warningLog?.message?.toLowerCase().includes('category') ||
+                                                 !selectedConflictProduct.product.classpath;
+                      return (
+                        <>
+                          <div>
+                            {isTaxonomyConflict ? (
+                              <span style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c084fc', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                                📌 HITL Checkpoint #1: Taxonomy Review
+                              </span>
+                            ) : (
+                              <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                                ⚙️ HITL Checkpoint #2: Attribute/Enrichment Review
+                              </span>
+                            )}
                           </div>
 
-                          <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-glass)', paddingTop: '12px' }}>
-                            <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Input Manual Resolution Override:</label>
-                            <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                              <input 
-                                type="text" 
-                                id={`custom_resolve_${c.id}`} 
-                                className="form-input" 
-                                placeholder="Type value override..." 
-                                style={{ flexGrow: 1 }}
-                              />
-                              <button 
-                                className="btn btn-primary"
-                                onClick={() => {
-                                  const v = document.getElementById(`custom_resolve_${c.id}`).value;
-                                  if (v) handleResolveConflict(selectedConflictProduct.product.id, c.id, v);
-                                }}
-                              >
-                                Resolve
-                              </button>
+                          {warningLog && (
+                            <div style={{
+                              background: 'rgba(239, 68, 68, 0.08)',
+                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              borderRadius: '8px',
+                              padding: '12px',
+                              color: '#f87171',
+                              fontSize: '0.85rem',
+                              display: 'flex',
+                              alignItems: 'start',
+                              gap: '8px'
+                            }}>
+                              <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+                              <div>
+                                <strong style={{ fontWeight: '700' }}>Flagged Reason:</strong> {warningLog.message}
+                              </div>
                             </div>
-                          </div>
+                          )}
+                        </>
+                      );
+                    })()}
+
+                    {/* ✨ AI Resolution Assistant Widget */}
+                    <div style={{
+                      background: 'rgba(139, 92, 246, 0.06)',
+                      border: '1px solid rgba(139, 92, 246, 0.25)',
+                      borderRadius: '8px',
+                      padding: '14px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px'
+                    }}>
+                      <style dangerouslySetInnerHTML={{__html: `
+                        @keyframes spin {
+                          0% { transform: rotate(0deg); }
+                          100% { transform: rotate(360deg); }
+                        }
+                        .spin-anim {
+                          animation: spin 1s infinite linear;
+                        }
+                      `}} />
+                      <div style={{ flexGrow: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700', color: '#c084fc', fontSize: '0.85rem' }}>
+                          ✨ AI Resolution Assistant
                         </div>
-                      ))}
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', lineHeight: '1.3' }}>
+                          Query Gemini to analyze description & suggest Category Classpath, brand, and spec attributes.
+                        </div>
+                      </div>
+                      <button 
+                        className="btn btn-primary"
+                        onClick={handleAiAssist}
+                        disabled={isAiAssisting}
+                        style={{
+                          background: 'linear-gradient(135deg, #a78bfa 0%, #7c3aed 100%)',
+                          border: 'none',
+                          color: '#fff',
+                          fontSize: '0.75rem',
+                          padding: '6px 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          cursor: isAiAssisting ? 'not-allowed' : 'pointer'
+                        }}
+                      >
+                        {isAiAssisting ? (
+                          <>
+                            <span className="spin-anim" style={{ width: '10px', height: '10px', border: '2px solid #fff', borderTop: '2px solid transparent', borderRadius: '50%', display: 'inline-block' }}></span >
+                            Thinking...
+                          </>
+                        ) : (
+                          "AI Suggestions"
+                        )}
+                      </button>
+                    </div>
+
+                    {/* Competing Agent Conflicts Resolvers */}
+                    {selectedConflictProduct.conflicts && selectedConflictProduct.conflicts.length > 0 && (
+                      <div style={{ border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: '8px', padding: '12px', background: 'rgba(239, 68, 68, 0.02)' }}>
+                        <h4 style={{ fontSize: '0.85rem', fontWeight: '700', color: '#f87171', marginBottom: '10px', textTransform: 'uppercase' }}>Agent Multi-Source Conflicts</h4>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                          {selectedConflictProduct.conflicts.map(c => (
+                            <div key={c.id} style={{ border: '1px solid var(--border-glass)', borderRadius: '6px', padding: '10px', background: 'rgba(0,0,0,0.1)' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)' }}>
+                                Conflicting Field: {c.field_name}
+                              </span>
+                              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginTop: '8px' }}>
+                                <div 
+                                  onClick={() => {
+                                    if (c.field_name === 'resolved_brand') setConflictResolvedBrand(c.value_a);
+                                    else if (c.field_name === 'resolved_manufacturer') setConflictResolvedManufacturer(c.value_a);
+                                    else if (c.field_name === 'classpath') setConflictClasspath(c.value_a);
+                                  }}
+                                  style={{ border: '1px dashed var(--border-glass)', padding: '8px', borderRadius: '4px', cursor: 'pointer', textAlign: 'center' }}
+                                >
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Source: {c.agent_a}</div>
+                                  <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--success)', marginTop: '2px' }}>{c.value_a || "NaN"}</div>
+                                </div>
+                                <div 
+                                  onClick={() => {
+                                    if (c.field_name === 'resolved_brand') setConflictResolvedBrand(c.value_b);
+                                    else if (c.field_name === 'resolved_manufacturer') setConflictResolvedManufacturer(c.value_b);
+                                    else if (c.field_name === 'classpath') setConflictClasspath(c.value_b);
+                                  }}
+                                  style={{ border: '1px dashed var(--border-glass)', padding: '8px', borderRadius: '4px', cursor: 'pointer', textAlign: 'center' }}
+                                >
+                                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Source: {c.agent_b}</div>
+                                  <div style={{ fontSize: '0.85rem', fontWeight: '700', color: 'var(--success)', marginTop: '2px' }}>{c.value_b || "NaN"}</div>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Interactive Fields Editor Form */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Resolved Brand</label>
+                        <input 
+                          type="text" 
+                          className="form-input" 
+                          value={conflictResolvedBrand} 
+                          onChange={e => setConflictResolvedBrand(e.target.value)} 
+                          placeholder="Resolved brand..." 
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Resolved Manufacturer</label>
+                        <input 
+                          type="text" 
+                          className="form-input" 
+                          value={conflictResolvedManufacturer} 
+                          onChange={e => setConflictResolvedManufacturer(e.target.value)} 
+                          placeholder="Resolved manufacturer..." 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Taxonomy Classpath</label>
+                      <input 
+                        type="text" 
+                        className="form-input" 
+                        value={conflictClasspath} 
+                        onChange={e => setConflictClasspath(e.target.value)} 
+                        placeholder="Taxonomy classpath (e.g. Category>Subcategory)..." 
+                      />
+                    </div>
+
+                    <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '12px' }}>
+                      <h4 style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginBottom: '8px' }}>B2B Descriptions</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                        <div className="form-group">
+                          <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Invoice Description (max 40 chars)</label>
+                          <input 
+                            type="text" 
+                            className="form-input" 
+                            value={conflictInvoiceDesc} 
+                            maxLength={40}
+                            onChange={e => setConflictInvoiceDesc(e.target.value)} 
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Mobile Description (60-80 chars)</label>
+                          <input 
+                            type="text" 
+                            className="form-input" 
+                            value={conflictMobileDesc} 
+                            onChange={e => setConflictMobileDesc(e.target.value)} 
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Short Description</label>
+                          <input 
+                            type="text" 
+                            className="form-input" 
+                            value={conflictShortDesc} 
+                            onChange={e => setConflictShortDesc(e.target.value)} 
+                          />
+                        </div>
+                        <div className="form-group">
+                          <label className="form-label" style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Long Description</label>
+                          <textarea 
+                            className="form-input" 
+                            rows={3}
+                            value={conflictLongDesc} 
+                            onChange={e => setConflictLongDesc(e.target.value)} 
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Extracted Attributes List */}
+                    <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '12px' }}>
+                      <h4 style={{ fontSize: '0.9rem', color: 'var(--text-main)', marginBottom: '8px' }}>Extracted Attributes</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                        {conflictAttributes.map((attr, idx) => (
+                          <div key={idx} style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                            <input 
+                              type="text" 
+                              className="form-input" 
+                              value={attr.label || ''} 
+                              onChange={e => {
+                                const updated = [...conflictAttributes];
+                                updated[idx] = { ...updated[idx], label: e.target.value };
+                                setConflictAttributes(updated);
+                              }}
+                              placeholder="Label"
+                              style={{ width: '30%', fontSize: '0.8rem', padding: '6px' }}
+                            />
+                            <input 
+                              type="text" 
+                              className="form-input" 
+                              value={attr.value || ''} 
+                              onChange={e => {
+                                const updated = [...conflictAttributes];
+                                updated[idx] = { ...updated[idx], value: e.target.value };
+                                setConflictAttributes(updated);
+                              }}
+                              placeholder="Value"
+                              style={{ width: '45%', fontSize: '0.8rem', padding: '6px' }}
+                            />
+                            <input 
+                              type="text" 
+                              className="form-input" 
+                              value={attr.uom || ''} 
+                              onChange={e => {
+                                const updated = [...conflictAttributes];
+                                updated[idx] = { ...updated[idx], uom: e.target.value };
+                                setConflictAttributes(updated);
+                              }}
+                              placeholder="UOM"
+                              style={{ width: '15%', fontSize: '0.8rem', padding: '6px' }}
+                            />
+                            <button 
+                              className="btn btn-secondary" 
+                              style={{ padding: '6px', color: 'var(--danger)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              onClick={() => {
+                                setConflictAttributes(conflictAttributes.filter((_, i) => i !== idx));
+                              }}
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                      <button 
+                        className="btn btn-secondary" 
+                        style={{ marginTop: '8px', padding: '4px 10px', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                        onClick={() => setConflictAttributes([...conflictAttributes, { label: '', value: '', uom: '' }])}
+                      >
+                        <Plus size={12} /> Add Attribute
+                      </button>
+                    </div>
+
+                    <div style={{ marginTop: '16px', borderTop: '1px solid var(--border-glass)', paddingTop: '16px', display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+                      <button 
+                        className="btn btn-secondary" 
+                        onClick={() => setSelectedConflictProduct(null)}
+                      >
+                        Cancel
+                      </button>
+                      <button 
+                        className="btn btn-primary"
+                        onClick={handleApproveConflictProduct}
+                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                      >
+                        <CheckCircle size={16} /> Approve and Complete Record
+                      </button>
                     </div>
                   </div>
                 ) : (

@@ -19,7 +19,9 @@ def verify():
     cursor = conn.cursor()
     products = cursor.execute("SELECT * FROM products WHERE status = 'completed'").fetchall()
     
-    temp_export = r"C:\Users\Sneha\.gemini\antigravity-ide\brain\97df2dfe-e32a-4f4c-96c1-8048a263b6aa\scratch\exported_verification.csv"
+    temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scratch")
+    os.makedirs(temp_dir, exist_ok=True)
+    temp_export = os.path.join(temp_dir, "exported_verification.csv")
     
     with open(temp_export, 'w', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)

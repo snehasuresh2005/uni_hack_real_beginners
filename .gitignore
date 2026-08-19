@@ -4,6 +4,7 @@ enriched_products.csv
 enrichment_trace.csv
 test.csv
 
+
 # Python
 __pycache__/
 *.pyc
@@ -22,6 +23,7 @@ dist/
 
 # Databases
 backend/database.db
+backend/settings.json
 
 # IDEs and System files
 .vscode/

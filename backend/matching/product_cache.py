@@ -36,17 +36,11 @@ def find_cached_product(fingerprint, cursor=None):
             cursor.connection.close()
 
 def save_fingerprint(product_id, fingerprint, cursor=None):
-    own_conn = False
-    if cursor is None:
-        conn = get_db_connection()
-        conn.execute("BEGIN IMMEDIATE")
-        cursor = conn.cursor()
-        own_conn = True
-        
-    try:
+    if cursor is not None:
         cursor.execute("UPDATE products SET fingerprint = ? WHERE id = ?", (fingerprint, product_id))
-        if own_conn:
-            cursor.connection.commit()
-    finally:
-        if own_conn:
-            cursor.connection.close()
+        return
+        
+    def do_write(c):
+        c.execute("UPDATE products SET fingerprint = ? WHERE id = ?", (fingerprint, product_id))
+    from backend.database import db_writer
+    db_writer.execute(do_write, wait=True)

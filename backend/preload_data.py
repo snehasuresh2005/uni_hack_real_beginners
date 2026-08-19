@@ -42,9 +42,9 @@ def preload():
             mobile_desc = str(row.get("MOBILE_DESC", "FRIGIDAIRE Professional Dishwasher, Leg Mounting, SS"))
             short_desc = str(row.get("SHORT_DESC", "FRIGIDAIRE® Professional Series PDSH4816AF Dishwasher"))
             long_desc = str(row.get("LONG_DESC1", "FRIGIDAIRE® Dishwasher With CleanBoost™..."))
-            classpath = str(row.get("Classpath", "Appliances & Consumer Electronics > Kitchen Appliances > Built-In Dishwashers"))
+            classpath = str(row.get("Classpath", "Appliances & Consumer Electronics>Kitchen Appliances>Built-In Dishwashers"))
             
-            cat = "Appliances > Dishwashers"
+            cat = "Appliances>Dishwashers"
             
             # Insert product as completed with descriptive fields
             cursor.execute(
@@ -75,7 +75,7 @@ def preload():
             # Write agent logs to show realistic processing path
             logs = [
                 ("System", "INFO", "Ingestion completed. Profiling product category..."),
-                ("System", "SUCCESS", "Categorized as: Appliances & Consumer Electronics > Kitchen Appliances > Built-In Dishwashers"),
+                ("System", "SUCCESS", "Categorized as: Appliances & Consumer Electronics>Kitchen Appliances>Built-In Dishwashers"),
                 ("Web Research", "INFO", "Searching manufacturer catalogs and distributor websites..."),
                 ("Web Research", "SUCCESS", f"Found data sheet at {mfr_url}"),
                 ("Doc Intelligence", "INFO", "Parsing PDF layout, structural tables, and metadata..."),

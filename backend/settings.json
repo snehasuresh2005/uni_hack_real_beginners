@@ -1,5 +1,0 @@
-{
-    "llm_provider": "ollama",
-    "gemini_api_key": "",
-    "ollama_model": "llama3"
-}

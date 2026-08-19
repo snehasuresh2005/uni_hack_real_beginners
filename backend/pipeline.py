@@ -33,31 +33,31 @@ PART_WITH_UNIT_REGEX = re.compile(
 # Category dictionary with specific properties to enrich
 DOMAINS = {
     "sanding_belt": {
-        "name": "Abrasives > Sanding Belts",
+        "name": "Abrasives>Sanding Belts",
         "attributes": ["Grit", "Length", "Width", "Material", "Pack Size", "Backing Type"],
         "keywords": ["sanding belt", "sanding belts"],
         "negative_keywords": ["disc", "wheel"]
     },
     "sanding_disc": {
-        "name": "Abrasives > Sanding Discs",
+        "name": "Abrasives>Sanding Discs",
         "attributes": ["Grit", "Diameter", "Attachment Type", "Backing Material", "Abrasive Material", "Pack Size", "Series"],
         "keywords": ["stikit", "sanding disc", "film", "abrasive disc", "hook and loop", "psa", "abranet", "hiolit", "flap disc"],
         "negative_keywords": ["cut-off", "cutoff", "cutting", "grinding", "belt"]
     },
     "cutoff_disc": {
-        "name": "Abrasives > Cut-Off Discs",
+        "name": "Abrasives>Cut-Off Discs",
         "attributes": ["Diameter", "Thickness", "Arbor Size", "Max RPM", "Material", "Pack Size"],
         "keywords": ["cut-off", "cutoff", "cutting wheel", "cutting disc", "grinding disc", "metal cut", "steel demon", "speed demon"],
         "negative_keywords": ["sanding", "stikit", "film", "abranet"]
     },
     "bearing": {
-        "name": "Power Transmission > Bearings",
+        "name": "Power Transmission>Bearings",
         "attributes": ["Bore Diameter", "Outer Diameter", "Width", "Seal Type", "Material", "Clearance"],
         "keywords": ["bearing", "ball bearing", "roller bearing", "6205", "skf"],
         "negative_keywords": []
     },
     "dishwasher": {
-        "name": "Appliances > Dishwashers",
+        "name": "Appliances>Dishwashers",
         "attributes": ["Voltage Rating", "Amperage Rating", "Size", "Sound Level", "Material", "Number of Wash Cycles"],
         "keywords": ["dishwasher", "washer", "built-in dishwasher", "ss dishwasher"]
     },
@@ -168,10 +168,27 @@ def predict_domain(desc):
 
 def log_agent_action(cursor, product_id, agent_name, level, message):
     timestamp = datetime.now().isoformat()
-    cursor.execute(
-        "INSERT INTO agent_logs (product_id, agent_name, timestamp, message, level) VALUES (?, ?, ?, ?, ?)",
-        (product_id, agent_name, timestamp, message, level)
-    )
+    
+    # Asynchronously execute database log write
+    def do_write(c):
+        c.execute(
+            "INSERT INTO agent_logs (product_id, agent_name, timestamp, message, level) VALUES (?, ?, ?, ?, ?)",
+            (product_id, agent_name, timestamp, message, level)
+        )
+    from backend.database import db_writer
+    db_writer.execute(do_write, wait=False)
+
+    try:
+        from backend.logs_broker import logs_broker
+        logs_broker.publish({
+            "product_id": product_id,
+            "agent_name": agent_name,
+            "timestamp": timestamp,
+            "message": message,
+            "level": level
+        })
+    except Exception as e:
+        print("Failed to publish log update to broker:", e)
 
 def extract_regex_specs(desc, domain_id):
     attrs = {}
@@ -676,115 +693,121 @@ def validate_row(row):
 
 def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ollama_model="llama3", llm_budget=None):
     conn = get_db_connection()
-    conn.execute("BEGIN IMMEDIATE")
-    cursor = conn.cursor()
-    
-    product = cursor.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    product = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+    conn.close()
     if not product:
-        conn.close()
         return False
+    cursor = None
         
     mfg_part_num = product["mfg_part_num"]
     part_desc = product["part_desc"]
     part_manuf = product["part_manuf"]
     brand_name = product["e1_brand"] or product["unilog_brand"] or product["dib_brand"] or ""
     
-    cursor.execute(
-        "UPDATE products SET status = 'processing', confidence_score = 0.0, category = NULL WHERE id = ?",
-        (product_id,)
-    )
-    cursor.execute("DELETE FROM attributes WHERE product_id = ?", (product_id,))
-    cursor.execute("DELETE FROM agent_logs WHERE product_id = ?", (product_id,))
-    cursor.execute("DELETE FROM conflicts WHERE product_id = ?", (product_id,))
+    # Initialize pipeline run: status='processing', clear old run data
+    def start_product_write(c, p_id):
+        c.execute(
+            "UPDATE products SET status = 'processing', confidence_score = 0.0, category = NULL WHERE id = ?",
+            (p_id,)
+        )
+        c.execute("DELETE FROM attributes WHERE product_id = ?", (p_id,))
+        c.execute("DELETE FROM agent_logs WHERE product_id = ?", (p_id,))
+        c.execute("DELETE FROM conflicts WHERE product_id = ?", (p_id,))
+    from backend.database import db_writer
+    db_writer.execute(start_product_write, product_id, wait=True)
     
-    # Phase 1: Ingestion
-    log_agent_action(cursor, product_id, "System", "INFO", "Ingestion completed. Checking for duplicates...")
-    time.sleep(0.1)
-    
-    # Phase 2: Deduplication (4 Levels)
-    from backend.preprocessing.deduplicator import check_duplicate
-    dup_id, dup_reason = check_duplicate(product_id, mfg_part_num, part_desc, part_manuf, brand_name, cursor=cursor)
-    if dup_id:
-        log_agent_action(cursor, product_id, "System", "WARNING", f"Duplicate detected: {dup_reason} of product ID {dup_id}")
-        cursor.execute("UPDATE products SET status = 'duplicate', confidence_score = 1.0 WHERE id = ?", (product_id,))
-        other_attrs = cursor.execute("SELECT label, value, uom, confidence, source, citation FROM attributes WHERE product_id = ?", (dup_id,)).fetchall()
-        for oa in other_attrs:
-            cursor.execute(
-                "INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (product_id, oa["label"], oa["value"], oa["uom"], oa["confidence"], oa["source"], oa["citation"])
-            )
-        conn.commit()
-        conn.close()
-        return True
-        
-    # Phase 3: Cache lookup
+    # Phase 1/8: cache-check
+    log_agent_action(None, product_id, "System", "INFO", "Phase 1/8: cache-check - Checking semantic product cache...")
     from backend.matching.product_cache import compute_fingerprint, find_cached_product
     fp = compute_fingerprint(part_manuf, brand_name, mfg_part_num, part_desc)
-    cached = find_cached_product(fp, cursor=cursor)
+    cached = find_cached_product(fp, cursor=None)
     if cached:
         p_data, attrs_data = cached
-        log_agent_action(cursor, product_id, "System", "SUCCESS", "Cache hit: Reusing verified record details.")
-        cursor.execute(
-            """UPDATE products 
-            SET status = 'completed', confidence_score = 1.0, category = ?, mfr_url = ?, 
-                invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?, classpath = ?, fingerprint = ?,
-                resolved_manufacturer = ?, resolved_brand = ?, retail_desc = ?, marketing_description = ?,
-                product_name = ?, with_field = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?,
-                product_image = ?, specification_sheet = ?
-            WHERE id = ?""",
-            (p_data["category"], p_data["mfr_url"], p_data["invoice_desc"], p_data["mobile_desc"], p_data["short_desc"], p_data["long_desc"], p_data["classpath"], fp,
-             p_data.get("resolved_manufacturer"), p_data.get("resolved_brand"), p_data.get("retail_desc"), p_data.get("marketing_description"),
-             p_data.get("product_name"), p_data.get("with_field"), p_data.get("ref_url_1"), p_data.get("ref_url_2"), p_data.get("ref_url_3"), p_data.get("ref_url_4"), p_data.get("ref_url_5"),
-             p_data.get("product_image"), p_data.get("specification_sheet"), product_id)
-        )
-        for ad in attrs_data:
-            cursor.execute(
-                "INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (product_id, ad["label"], ad["value"], ad["uom"], ad["confidence"], ad["source"], ad["citation"])
+        log_agent_action(None, product_id, "System", "SUCCESS", "Cache hit: Reusing verified record details.")
+        def write_cache_hit(c, p_id, fp_val, p_d, attrs_d):
+            c.execute(
+                """UPDATE products 
+                SET status = 'completed', confidence_score = 1.0, category = ?, mfr_url = ?, 
+                    invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?, classpath = ?, fingerprint = ?,
+                    resolved_manufacturer = ?, resolved_brand = ?, retail_desc = ?, marketing_description = ?,
+                    product_name = ?, with_field = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?,
+                    product_image = ?, specification_sheet = ?
+                WHERE id = ?""",
+                (p_d["category"], p_d["mfr_url"], p_d["invoice_desc"], p_d["mobile_desc"], p_d["short_desc"], p_d["long_desc"], p_d["classpath"], fp_val,
+                 p_d.get("resolved_manufacturer"), p_d.get("resolved_brand"), p_d.get("retail_desc"), p_d.get("marketing_description"),
+                 p_d.get("product_name"), p_d.get("with_field"), p_d.get("ref_url_1"), p_d.get("ref_url_2"), p_d.get("ref_url_3"), p_d.get("ref_url_4"), p_d.get("ref_url_5"),
+                 p_d.get("product_image"), p_d.get("specification_sheet"), p_id)
             )
-        conn.commit()
-        conn.close()
+            for ad in attrs_d:
+                c.execute(
+                    "INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (p_id, ad["label"], ad["value"], ad["uom"], ad["confidence"], ad["source"], ad["citation"])
+                )
+        db_writer.execute(write_cache_hit, product_id, fp, p_data, attrs_data, wait=True)
         return True
         
-    cursor.execute("UPDATE products SET fingerprint = ? WHERE id = ?", (fp, product_id))
+    def write_fingerprint(c, fp_val, p_id):
+        c.execute("UPDATE products SET fingerprint = ? WHERE id = ?", (fp_val, p_id))
+    db_writer.execute(write_fingerprint, fp, product_id, wait=True)
+    log_agent_action(None, product_id, "System", "SUCCESS", "Cache miss: Product not found in cache.")
     
-    # Phase 4: Difficulty Classification
+    # Phase 2/8: dedup
+    log_agent_action(None, product_id, "System", "INFO", "Phase 2/8: dedup - Checking for duplicate products...")
+    from backend.preprocessing.deduplicator import check_duplicate
+    dup_id, dup_reason = check_duplicate(product_id, mfg_part_num, part_desc, part_manuf, brand_name, cursor=None)
+    if dup_id:
+        log_agent_action(None, product_id, "System", "WARNING", f"Duplicate detected: {dup_reason} of product ID {dup_id}")
+        def write_duplicate(c, p_id, d_id):
+            c.execute("UPDATE products SET status = 'duplicate', confidence_score = 1.0 WHERE id = ?", (p_id,))
+            other_attrs = c.execute("SELECT label, value, uom, confidence, source, citation FROM attributes WHERE product_id = ?", (d_id,)).fetchall()
+            for oa in other_attrs:
+                c.execute(
+                    "INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (p_id, oa["label"], oa["value"], oa["uom"], oa["confidence"], oa["source"], oa["citation"])
+                )
+        db_writer.execute(write_duplicate, product_id, dup_id, wait=True)
+        return True
+    log_agent_action(None, product_id, "System", "SUCCESS", "Deduplication check passed: Product is unique.")
+    
+    # Phase 3/8: normalize
+    log_agent_action(None, product_id, "System", "INFO", "Phase 3/8: normalize - Normalizing brand and manufacturer...")
+    norm_mfr, norm_brd = resolve_brand_and_manufacturer(mfg_part_num, part_desc, part_manuf, brand_name)
+    log_agent_action(None, product_id, "System", "SUCCESS", f"Normalized manufacturer to '{norm_mfr}', brand to '{norm_brd}'.")
+    
+    # Phase 4/8: classify
+    log_agent_action(None, product_id, "System", "INFO", "Phase 4/8: classify - Assessing product difficulty...")
     from backend.classification.difficulty import classify_difficulty
     diff = classify_difficulty(mfg_part_num, part_desc, part_manuf, brand_name)
     level = diff["level"]
     score = diff["score"]
     reasons_str = ", ".join(diff["reasons"])
     
-    cursor.execute(
-        "UPDATE products SET difficulty_level = ?, difficulty_score = ?, difficulty_reasons = ? WHERE id = ?",
-        (level, score, reasons_str, product_id)
-    )
-    log_agent_action(cursor, product_id, "System", "INFO", f"Difficulty classified as {level} (Score: {score}). Reasons: {reasons_str or 'None'}")
+    def write_difficulty(c, lvl, sc, reasons, p_id):
+        c.execute(
+            "UPDATE products SET difficulty_level = ?, difficulty_score = ?, difficulty_reasons = ? WHERE id = ?",
+            (lvl, sc, reasons, p_id)
+        )
+    db_writer.execute(write_difficulty, level, score, reasons_str, product_id, wait=True)
+    log_agent_action(None, product_id, "System", "SUCCESS", f"Difficulty classified as {level} (Score: {score}). Reasons: {reasons_str or 'None'}")
     
-    # Phase 5: Taxonomy Core INDIVIDUAL Resolution
+    # Phase 5/8: taxonomy
+    log_agent_action(None, product_id, "System", "INFO", "Phase 5/8: taxonomy - Resolving taxonomy category classpath...")
     domain_id, classpath, category_name = resolve_taxonomy(
         part_desc,
-        # Semantic extraction below can resolve genuinely incomplete records.  Do
-        # not spend a separate request on taxonomy when deterministic routing is
-        # sufficient for this bounded domain catalog.
         use_llm=False,
         llm_provider=llm_provider,
         ollama_model=ollama_model
     )
     log_agent_action(cursor, product_id, "System", "SUCCESS", f"Categorized taxonomy: {classpath}")
     
-    # Phase 6: Attribute Extraction & Normalization
+    # Phase 6/8: regex
+    log_agent_action(cursor, product_id, "System", "INFO", "Phase 6/8: regex - Performing regex attribute extraction...")
     attributes_to_extract = DOMAINS[domain_id]["attributes"]
     extracted_data = []
-    
-    # Brand and Manufacturer canonical resolution
-    norm_mfr, norm_brd = resolve_brand_and_manufacturer(mfg_part_num, part_desc, part_manuf, brand_name)
-    
     regex_attrs = extract_regex_specs(part_desc, domain_id)
+    log_agent_action(cursor, product_id, "System", "SUCCESS", f"Extracted {len(regex_attrs)} attributes via deterministic patterns.")
     
-    # Use AI only when deterministic extraction has poor coverage.  HARD alone is
-    # not a reason to call a model: missing brand/manufacturer is often resolved by
-    # normalization rather than generation.
+    # Phase 7/8: LLM
     regex_coverage = len(set(regex_attrs).intersection(attributes_to_extract)) / max(1, len(attributes_to_extract))
     use_llm = (
         level == "HARD"
@@ -799,6 +822,7 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
             log_agent_action(cursor, product_id, "System", "INFO", "LLM budget exhausted; routed to deterministic extraction/HITL.")
 
     if use_llm:
+        log_agent_action(cursor, product_id, "System", "INFO", f"Phase 7/8: LLM - Querying model ({llm_provider}) for spec extraction...")
         if is_ollama_available(): # Prioritize local Ollama for cost savings
             log_agent_action(cursor, product_id, "System", "INFO", f"Contacting local Ollama model ({ollama_model}) for spec extraction...")
             prompt = f"""
@@ -877,6 +901,8 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
                             log_agent_action(cursor, product_id, "System", "SUCCESS", "Gemini API extraction completed.")
                 except Exception as e:
                     print("Failed parsing Gemini JSON:", e)
+    else:
+        log_agent_action(cursor, product_id, "System", "INFO", "Phase 7/8: LLM - Skipped (LLM spec extraction not required).")
 
     # Deterministic regex backfill
     extracted_names = {item["attribute"] for item in extracted_data}
@@ -977,9 +1003,19 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     marketing_description = generate_marketing_description(domain_id)
 
     # Phase 8: Plausible Vision & Support Assets
-    web_url, mfr_domain = resolve_mfr_url(mfg_part_num, norm_mfr, norm_brd)
-    ref_urls = resolve_ref_urls(mfg_part_num, mfr_domain)
-    img_url, spec_url = resolve_asset_urls(mfg_part_num, mfr_domain)
+    # Disallowed synthetic template generation per safety guidelines.
+    # URLs and documents must be verified or provided during ingestion/HITL.
+    # Otherwise, they are left blank and flagged for human review.
+    web_url = product["mfr_url"] or ""
+    ref_urls = [
+        product["ref_url_1"] or "",
+        product["ref_url_2"] or "",
+        product["ref_url_3"] or "",
+        product["ref_url_4"] or "",
+        product["ref_url_5"] or ""
+    ]
+    img_url = product["product_image"] or ""
+    spec_url = product["specification_sheet"] or ""
 
     # Phase 9: Validation & Confidence scoring
     # Normalize stale placeholder brands from DB before validation
@@ -988,11 +1024,6 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     clean_unilog = normalize_placeholder(product["unilog_brand"] or "")
     clean_dib = normalize_placeholder(product["dib_brand"] or "")
     
-    # Update DB to strip placeholders for clean export
-    cursor.execute(
-        "UPDATE products SET e1_brand = ?, unilog_brand = ?, dib_brand = ? WHERE id = ?",
-        (clean_e1, clean_unilog, clean_dib, product_id)
-    )
     
     row_data = {
         "e1_brand": clean_e1,
@@ -1004,6 +1035,8 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
         "product_name": prod_name,
         "part_desc": part_desc
     }
+    # Phase 8/8: QA
+    log_agent_action(cursor, product_id, "System", "INFO", "Phase 8/8: QA - Running QA compliance and validation checks...")
     validation_errors = validate_row(row_data)
 
     # Run robust final semantic consistency validator
@@ -1015,6 +1048,8 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
         trigger_hitl = True
         consistency_reasons.extend(validation_errors)
 
+
+
     scores = [item["confidence"] for item in extracted_data]
     avg_score = sum(scores) / len(scores) if scores else 0.85
     if level == "HARD" or avg_score < 0.70 or norm_mfr == "UNKNOWN" or norm_brd == "UNKNOWN" or trigger_hitl:
@@ -1023,34 +1058,34 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     status = "flagged_hitl" if trigger_hitl else "completed"
 
     if status == "flagged_hitl":
-        log_agent_action(cursor, product_id, "System", "WARNING", f"QA Compliance or Consistency check failed. Reasons: {', '.join(consistency_reasons) or 'None'}. Queued for human review.")
+        log_agent_action(None, product_id, "System", "WARNING", f"QA Compliance or Consistency check failed. Reasons: {', '.join(consistency_reasons) or 'None'}. Queued for human review.")
     else:
-        log_agent_action(cursor, product_id, "System", "SUCCESS", f"Enrichment completed with {int(avg_score * 100)}% confidence.")
+        log_agent_action(None, product_id, "System", "SUCCESS", f"Enrichment completed with {int(avg_score * 100)}% confidence.")
 
     # Save to database
-    cursor.execute(
-        """UPDATE products 
-        SET status = ?, confidence_score = ?, category = ?, mfr_url = ?, 
-            invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?, classpath = ?,
-            resolved_manufacturer = ?, resolved_brand = ?, retail_desc = ?, marketing_description = ?,
-            product_name = ?, with_field = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?,
-            product_image = ?, specification_sheet = ?
-        WHERE id = ?""",
-        (status, avg_score, category_name, web_url, invoice_desc, mobile_desc, short_desc, long_desc, classpath,
-         norm_mfr, norm_brd, retail_desc, marketing_description, prod_name, with_field,
-         ref_urls[0], ref_urls[1], ref_urls[2], ref_urls[3], ref_urls[4],
-         img_url, spec_url, product_id)
-    )
-    
-    # Save attributes
-    for item in extracted_data:
-        cursor.execute(
-            "INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (product_id, item["attribute"], item["value"], item["uom"], item["confidence"], item["source"], item["citation"])
+    def write_final_results(c, p_id, stat, avg_sc, cat_name, web, inv_d, mob_d, sh_d, lng_d, clspath, n_mfr, n_brd, ret_d, mkt_d, name_val, with_f, refs, img, spec, attrs):
+        c.execute(
+            """UPDATE products 
+            SET status = ?, confidence_score = ?, category = ?, mfr_url = ?, 
+                invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?, classpath = ?,
+                resolved_manufacturer = ?, resolved_brand = ?, retail_desc = ?, marketing_description = ?,
+                product_name = ?, with_field = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?,
+                product_image = ?, specification_sheet = ?
+            WHERE id = ?""",
+            (stat, avg_sc, cat_name, web, inv_d, mob_d, sh_d, lng_d, clspath,
+             n_mfr, n_brd, ret_d, mkt_d, name_val, with_f,
+             refs[0], refs[1], refs[2], refs[3], refs[4],
+             img, spec, p_id)
         )
-        
-    conn.commit()
-    conn.close()
+        for item in attrs:
+            c.execute(
+                "INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (p_id, item["attribute"], item["value"], item["uom"], item["confidence"], item["source"], item["citation"])
+            )
+            
+    from backend.database import db_writer
+    db_writer.execute(write_final_results, product_id, status, avg_score, category_name, web_url, invoice_desc, mobile_desc, short_desc, long_desc, classpath,
+                      norm_mfr, norm_brd, retail_desc, marketing_description, prod_name, with_field, ref_urls, img_url, spec_url, extracted_data, wait=True)
     return True
 
 def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama3", limit=10, llm_call_budget=50):

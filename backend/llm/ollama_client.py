@@ -27,24 +27,19 @@ def detect_available_models():
         return []
 
 def log_llm_call(product_id, reason_for_llm_call, model, input_size, output, confidence=1.0):
-    conn = get_db_connection()
-    conn.execute("BEGIN IMMEDIATE")
-    cursor = conn.cursor()
-    
     now = datetime.now().isoformat()
-    try:
-        cursor.execute(
+    def do_write(c):
+        c.execute(
             """INSERT INTO llm_calls 
             (product_id, reason_for_llm_call, model, timestamp, input_size, output, confidence) 
             VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                # Preserve enough for audit/debugging without storing every full response.
-                (product_id, reason_for_llm_call, model, now, input_size, str(output)[:1000], confidence)
+            (product_id, reason_for_llm_call, model, now, input_size, str(output)[:1000], confidence)
         )
-        conn.commit()
+    try:
+        from backend.database import db_writer
+        db_writer.execute(do_write, wait=False)
     except Exception as e:
         print("Failed to log LLM call to DB:", e)
-    finally:
-        conn.close()
 
 def should_use_llm(context):
     """
