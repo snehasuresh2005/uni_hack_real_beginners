@@ -683,13 +683,15 @@ def ensure_mobile_desc_bounds(mob_desc, norm_mfr="Industrial", norm_brd="", prod
     """
     s = str(mob_desc or "").strip()
     s = re.sub(r'[\r\n]+', ' ', s)
+    s = re.sub(r'\bUNKNOWN\b', '', s, flags=re.IGNORECASE).strip()
+    s = re.sub(r'^[\s,.-]+', '', s).strip()
     
     # 1. If empty or too short (< 60 chars), construct base with Brand + Mfr + Name + MPN
     if len(s) < 60:
         prefix_parts = []
-        if norm_mfr and norm_mfr.upper() != "UNKNOWN" and norm_mfr.lower() not in s.lower():
+        if norm_mfr and "UNKNOWN" not in norm_mfr.upper() and norm_mfr.lower() not in s.lower():
             prefix_parts.append(norm_mfr)
-        if norm_brd and norm_brd.upper() != "UNKNOWN" and norm_brd.lower() != norm_mfr.lower() and norm_brd.lower() not in s.lower():
+        if norm_brd and "UNKNOWN" not in norm_brd.upper() and norm_brd.lower() != (norm_mfr or "").lower() and norm_brd.lower() not in s.lower():
             prefix_parts.append(norm_brd)
         if prod_name and prod_name.lower() not in s.lower() and prod_name.lower() != "product":
             prefix_parts.append(prod_name)

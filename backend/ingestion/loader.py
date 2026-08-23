@@ -231,8 +231,15 @@ def resolve_canonical_brand_and_mfr(raw_brand, raw_mfr, mpn="", desc=""):
             resolved_m = v
             break
 
-    if not resolved_m:
-        resolved_m = raw_mfr.strip() if (raw_mfr and raw_mfr.strip()) else "Standard Manufacturer"
+    if not resolved_m or resolved_m.strip().upper() in ["UNKNOWN", "NO PART MANUF", "NO MANUFACTURER", "-- NO PART MANUF --"]:
+        if raw_mfr and raw_mfr.strip() and raw_mfr.strip().upper() not in ["UNKNOWN", "NO PART MANUF", "NO MANUFACTURER", "-- NO PART MANUF --"]:
+            resolved_m = raw_mfr.strip()
+        elif resolved_b and resolved_b.strip().upper() not in ["UNKNOWN", "GENERAL®"]:
+            import re
+            b_clean = re.sub(r'[®™]', '', resolved_b).strip()
+            resolved_m = f"{b_clean} Inc."
+        else:
+            resolved_m = "General Industrial Products"
 
     return resolved_b, resolved_m
 
