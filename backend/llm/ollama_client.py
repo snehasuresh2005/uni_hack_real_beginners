@@ -8,10 +8,13 @@ def get_ollama_url():
     return os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
 
 def is_ollama_available():
+    # Return False immediately in cloud production / Render environments
+    if os.environ.get("RENDER") or os.environ.get("ENVIRONMENT", "").lower() == "production":
+        return False
     url = get_ollama_url()
     try:
         req = urllib.request.Request(f"{url}/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=3) as response:
+        with urllib.request.urlopen(req, timeout=2) as response:
             return response.status == 200
     except Exception:
         return False
@@ -73,7 +76,7 @@ def query_ollama(prompt, model_name="llama3"):
             data=json.dumps(payload).encode("utf-8"),
             headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=60) as response:
+        with urllib.request.urlopen(req, timeout=5) as response:
             res_data = json.loads(response.read().decode("utf-8"))
             return res_data.get("response", "").strip()
     except Exception as e:

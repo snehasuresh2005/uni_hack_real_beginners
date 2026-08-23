@@ -52,7 +52,7 @@ def reset_provider_cooldown(provider=None):
 
 GROQ_MAX_SAFE_PROMPT_CHARS = 3500
 
-def query_openai_compatible_endpoint(url, payload, api_key, extra_headers=None, timeout=60):
+def query_openai_compatible_endpoint(url, payload, api_key, extra_headers=None, timeout=5):
     """
     Generic query helper for OpenAI-compatible REST endpoints (Groq, OpenRouter, etc.).
     Returns (status_code, response_text_or_error_msg).
@@ -92,7 +92,7 @@ def query_openai_compatible_endpoint(url, payload, api_key, extra_headers=None, 
     except Exception as e:
         return (500, f"Request error: {str(e)}")
 
-def query_gemini_provider(prompt, api_key=None, model_name=None, timeout=30):
+def query_gemini_provider(prompt, api_key=None, model_name=None, timeout=5):
     """Query Google Gemini API directly via REST endpoint with retry and model fallback."""
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY", "")
@@ -293,8 +293,12 @@ def query_llm_chain(prompt, product_id=None, reason="semantic extraction", setti
         chain = ["gemini", "groq", "openrouter"]
 
     if settings.get("enable_ollama_fallback", False) or os.environ.get("ENABLE_OLLAMA_FALLBACK", "false").lower() == "true":
-        if "ollama" not in chain:
+        if "ollama" not in chain and is_ollama_available():
             chain.append("ollama")
+
+    # If Ollama is not available in the current environment, filter it out from the failover chain
+    if not is_ollama_available():
+        chain = [p for p in chain if p != "ollama"]
 
     gemini_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")
     gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")

@@ -1018,8 +1018,27 @@ export default function App() {
               </div>
               <div className="stat-card card-warning">
                 <div className="stat-icon warning"><RotateCcw size={24} /></div>
-                <div className="stat-info">
-                  <span className="stat-label">Pending Enrichment</span>
+                <div className="stat-info" style={{ width: '100%' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                    <span className="stat-label">Pending Enrichment</span>
+                    {stats.processing > 0 && (
+                      <span style={{ 
+                        background: 'rgba(139, 92, 246, 0.15)', 
+                        color: '#8b5cf6', 
+                        fontSize: '0.725rem', 
+                        fontWeight: '700',
+                        padding: '2px 8px',
+                        borderRadius: '12px',
+                        border: '1px solid rgba(139, 92, 246, 0.3)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}>
+                        <span className="spin-anim" style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', background: '#8b5cf6' }}></span>
+                        {stats.processing} processing
+                      </span>
+                    )}
+                  </div>
                   <span className="stat-value">{stats.pending}</span>
                 </div>
               </div>
