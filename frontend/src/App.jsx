@@ -1116,7 +1116,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
+            <div className="glass-panel" style={{ width: '100%', minHeight: '520px', margin: 0 }}>
               <div 
                 style={{ border: '2px dashed var(--border-glass)', borderRadius: '8px', padding: '36px 20px', cursor: 'pointer', background: 'rgba(255,255,255,0.01)', textAlign: 'center' }}
                 onClick={() => fileInputRef.current.click()}
@@ -1188,7 +1188,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="glass-panel" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', margin: 0 }}>
+            <div className="glass-panel" style={{ width: '100%', minHeight: '520px', display: 'flex', flexDirection: 'column', margin: 0 }}>
 
             {/* Filter controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -1295,7 +1295,7 @@ export default function App() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 3.5fr', gap: '24px' }}>
-              <div className="glass-panel" style={{ margin: 0 }}>
+              <div className="glass-panel" style={{ margin: 0, minHeight: '520px' }}>
                 <h3 className="panel-title" style={{ marginBottom: '16px' }}><ShieldAlert size={18} color="var(--danger)" /> Flagged Conflicts</h3>
                 
                 {flaggedProducts.length === 0 ? (
@@ -1478,7 +1478,7 @@ export default function App() {
                 )}
               </div>
 
-              <div className="glass-panel" style={{ margin: 0 }}>
+              <div className="glass-panel" style={{ margin: 0, minHeight: '520px' }}>
                 {selectedConflictProduct ? (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxHeight: '80vh', overflowY: 'auto', paddingRight: '8px' }}>
                     <div>
@@ -1903,7 +1903,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
+            <div className="glass-panel" style={{ width: '100%', minHeight: '520px', margin: 0 }}>
 
             <div className="form-group" style={{ marginBottom: '20px' }}>
               <label className="form-label">Active Provider Selection Strategy</label>
