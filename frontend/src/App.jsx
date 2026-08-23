@@ -1107,7 +1107,7 @@ export default function App() {
 
         {/* --- INGESTION TAB --- */}
         {currentTab === 'ingestion' && (
-          <div className="glass-panel" style={{ maxWidth: '720px', margin: '0 auto' }}>
+          <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
             <div className="panel-header" style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '24px' }}>
               <h2 className="panel-title"><UploadCloud size={20} color="#8b5cf6" /> Ingest Product Catalog</h2>
             </div>
@@ -1890,7 +1890,7 @@ export default function App() {
 
         {/* --- SETTINGS TAB --- */}
         {currentTab === 'settings' && (
-          <div className="glass-panel" style={{ maxWidth: '680px', margin: '0 auto' }}>
+          <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
             <div className="panel-header" style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '24px' }}>
               <h2 className="panel-title"><SettingsIcon size={20} color="#8b5cf6" /> System Connection & LLM Redundancy Chain Settings</h2>
             </div>
@@ -1910,7 +1910,7 @@ export default function App() {
               </select>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px', marginBottom: '16px' }}>
               {/* Google Gemini */}
               <div style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
                 <div style={{ fontWeight: '600', color: '#a78bfa', fontSize: '0.85rem', marginBottom: '8px' }}>Google Gemini</div>
