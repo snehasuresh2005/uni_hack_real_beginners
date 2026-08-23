@@ -183,9 +183,9 @@ def query_groq_provider(prompt, api_key=None, model_name=None):
         print(f"[LLM Prompt Guard Warning] Prompt size ({len(prompt)} chars) exceeds Groq safe threshold ({GROQ_MAX_SAFE_PROMPT_CHARS} chars). Truncating payload...")
         prompt = prompt[:GROQ_MAX_SAFE_PROMPT_CHARS] + "\n[Truncated for Groq payload limits]"
 
-    requested_model = model_name or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    requested_model = model_name or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     candidate_models = [requested_model]
-    for alt in ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"]:
+    for alt in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "mixtral-8x7b-32768", "llama3-70b-8192", "llama3-8b-8192"]:
         if alt not in candidate_models:
             candidate_models.append(alt)
 
@@ -215,14 +215,14 @@ def query_openrouter_provider(prompt, api_key=None, model_name=None):
     if not api_key:
         return (401, "No OpenRouter API key provided")
 
-    requested_model = model_name or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    requested_model = model_name or os.environ.get("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
     candidate_models = [requested_model]
     for alt in [
-        "meta-llama/llama-3.1-8b-instruct:free",
-        "google/gemma-2-9b-it:free",
-        "qwen/qwen-2.5-72b-instruct:free",
-        "deepseek/deepseek-r1:free",
-        "meta-llama/llama-3.3-70b-instruct:free"
+        "google/gemma-4-31b-it:free",
+        "google/gemma-4-26b-a4b-it:free",
+        "nvidia/nemotron-3-nano-30b-a3b:free",
+        "nvidia/nemotron-3.5-lightning:free",
+        "dots-studio/dots-3-note-preview:free"
     ]:
         if alt not in candidate_models:
             candidate_models.append(alt)
@@ -299,15 +299,14 @@ def query_llm_chain(prompt, product_id=None, reason="semantic extraction", setti
     gemini_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")
     gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
     
-    groq_key = settings.get("groq_api_key") or os.environ.get("GROQ_API_KEY", "")
-    groq_model = settings.get("groq_model") or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    groq_model = settings.get("groq_model") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     if groq_model in ["gemma2-9b-it", "groq/compound"]:
-        groq_model = "llama-3.1-8b-instant"
+        groq_model = "llama-3.3-70b-versatile"
     
     openrouter_key = settings.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY", "")
-    openrouter_model = settings.get("openrouter_model") or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
-    if "llama-3.3-70b-instruct" in openrouter_model and not openrouter_model.endswith(":free"):
-        openrouter_model = "meta-llama/llama-3.1-8b-instruct:free"
+    openrouter_model = settings.get("openrouter_model") or os.environ.get("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
+    if "llama-3.1-8b-instruct" in openrouter_model or "gemma2-9b-it" in openrouter_model:
+        openrouter_model = "google/gemma-4-31b-it:free"
     
     ollama_model = settings.get("ollama_model") or os.environ.get("OLLAMA_MODEL", "llama3")
 

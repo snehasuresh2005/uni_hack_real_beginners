@@ -39,9 +39,9 @@ class ConnectionSettings(BaseModel):
     gemini_api_key: Optional[str] = ""
     gemini_model: Optional[str] = "gemini-3.5-flash"
     groq_api_key: Optional[str] = ""
-    groq_model: Optional[str] = "groq/compound"
+    groq_model: Optional[str] = "llama-3.3-70b-versatile"
     openrouter_api_key: Optional[str] = ""
-    openrouter_model: Optional[str] = "meta-llama/llama-3.3-70b-instruct"
+    openrouter_model: Optional[str] = "google/gemma-4-31b-it:free"
     ollama_model: Optional[str] = "llama3"
     enable_ollama_fallback: bool = False
     llm_call_budget: int = 50
@@ -59,9 +59,9 @@ def load_settings():
         "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
         "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
         "groq_api_key": os.environ.get("GROQ_API_KEY", ""),
-        "groq_model": os.environ.get("GROQ_MODEL", "groq/compound"),
+        "groq_model": os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
         "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY", ""),
-        "openrouter_model": os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct"),
+        "openrouter_model": os.environ.get("OPENROUTER_MODEL", "google/gemma-4-31b-it:free"),
         "ollama_model": os.environ.get("OLLAMA_MODEL", "llama3"),
         "enable_ollama_fallback": os.environ.get("ENABLE_OLLAMA_FALLBACK", "false").lower() == "true",
         "llm_call_budget": int(os.environ.get("LLM_CALL_BUDGET", "50"))
