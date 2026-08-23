@@ -1479,7 +1479,15 @@ def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama
     conn.close()
     
     if not pending:
+        conn.close()
         return 0
+
+    # Immediately mark selected batch items as 'processing' in DB to reflect instant UI progress
+    product_ids = [row["id"] for row in pending]
+    placeholders = ",".join("?" * len(product_ids))
+    cursor.execute(f"UPDATE products SET status = 'processing' WHERE id IN ({placeholders})", product_ids)
+    conn.commit()
+    conn.close()
 
     pending_dicts = [dict(row) for row in pending]
     batches = group_products_by_taxonomy(pending_dicts, batch_size=3)
