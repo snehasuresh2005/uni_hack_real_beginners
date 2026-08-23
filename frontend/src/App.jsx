@@ -986,24 +986,10 @@ export default function App() {
         {/* --- DASHBOARD TAB --- */}
         {currentTab === 'dashboard' && (
           <div>
-            <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div className="panel-header" style={{ marginBottom: '20px' }}>
               <div>
                 <h1>Platform Dashboard</h1>
                 <p className="subtitle" style={{ margin: 0 }}>Overview of product enrichment statistics and agent orchestration</p>
-              </div>
-              <div style={{
-                background: (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.9 ? 'rgba(239, 68, 68, 0.15)' : (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.7 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)',
-                color: (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.9 ? '#f87171' : (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.7 ? '#fbbf24' : '#60a5fa',
-                padding: '6px 14px',
-                borderRadius: '8px',
-                fontWeight: '700',
-                fontSize: '0.825rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                border: '1px solid rgba(255,255,255,0.1)'
-              }}>
-                <Zap size={15} /> LLM Quota Today: {stats.llm_calls_today || 0} / {stats.llm_call_budget || 50} Calls
               </div>
             </div>
 
