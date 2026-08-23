@@ -409,10 +409,10 @@ export default function App() {
       const lData = await lRes.json();
 
       setExtraStats({
-        easy: easyCount || Math.round(data.total * 0.65),
-        medium: medCount || Math.round(data.total * 0.25),
-        hard: hardCount || Math.round(data.total * 0.10),
-        cache_hits: cacheCount || Math.round(data.completed * 0.3),
+        easy: easyCount,
+        medium: medCount,
+        hard: hardCount,
+        cache_hits: cacheCount,
         llm_calls: lData.length || 0
       });
     } catch (err) {
@@ -638,12 +638,12 @@ export default function App() {
   const handleRunBulkEnrichment = async () => {
     try {
       setIsBulkProcessing(true);
-      const res = await fetch('/api/run-bulk?limit=30', { method: 'POST' });
+      const res = await fetch('/api/run-bulk?limit=50', { method: 'POST' });
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || "Enrichment failed");
       }
-      showToast("🚀 Catalog enrichment started (Demo Cap: Up to 30 products)", "success");
+      showToast("🚀 Catalog enrichment started — continuous pipeline active", "success");
       setTimeout(() => {
         fetchStats();
         fetchProducts(currentPage);
@@ -858,7 +858,7 @@ export default function App() {
                   cursor: isBulkProcessing ? 'wait' : 'pointer'
                 }}
               >
-                <Play size={16} /> {isBulkProcessing ? "Enriching Products..." : "Run Catalog Enrichment (Max 30 - Demo Cap)"}
+                <Play size={16} /> {isBulkProcessing ? "Enriching Pipeline Products..." : "Run Full Catalog Enrichment"}
               </button>
             )}
             {currentStage === 3 && (

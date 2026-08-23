@@ -284,8 +284,11 @@ def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget
     def bulk_wrapper():
         global IS_BULK_RUNNING
         try:
-            processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 30, budget)
-            print(f"[Bulk Pipeline] Completed enrichment batch. Processed: {processed} products.")
+            while True:
+                processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 50, budget)
+                print(f"[Bulk Pipeline] Batch completed. Processed: {processed} products.")
+                if processed == 0:
+                    break
         except Exception as err:
             print(f"[Bulk Pipeline Error] Exception during enrichment: {err}")
         finally:
