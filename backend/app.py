@@ -242,9 +242,20 @@ def clear_all_parsed_input():
 
     import pandas as pd
     from datetime import datetime
-    input_csv = os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv")
+    csv_candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "Unihack_Sample_Dataset_200.csv"),
+        "Unihack_Sample_Dataset_200.csv",
+        os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv"),
+        "Unihack_ Sample Dataset - Input.csv"
+    ]
+    input_csv = None
+    for path in csv_candidates:
+        if os.path.exists(path):
+            input_csv = path
+            break
+
     reloaded_count = 0
-    if os.path.exists(input_csv):
+    if input_csv:
         df = pd.read_csv(input_csv)
         now = datetime.now().isoformat()
         for _, row in df.iterrows():

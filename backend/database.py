@@ -244,6 +244,9 @@ def init_db():
     count = cursor.execute("SELECT COUNT(*) FROM products").fetchone()[0]
     if count == 0:
         csv_candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "Unihack_Sample_Dataset_200.csv"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "Unihack_Sample_Dataset_200.csv"),
+            "Unihack_Sample_Dataset_200.csv",
             os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv"),
             os.path.join(os.path.dirname(__file__), "..", "..", "Unihack_ Sample Dataset - Input.csv"),
             "Unihack_ Sample Dataset - Input.csv"
