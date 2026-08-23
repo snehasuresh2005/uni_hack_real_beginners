@@ -1161,6 +1161,7 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
         and should_use_llm({"task_type": "semantic_spec_extraction"})
     )
     llm_worked = False
+    llm_failed_flag = False
     
     if use_llm:
         if llm_budget is not None and not llm_budget.reserve():
@@ -1209,7 +1210,8 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
             else:
                 print(f"Could not find balanced JSON array in LLM response. Raw response (first 500 chars): {res_text[:500]}")
         if not llm_worked:
-            log_agent_action(cursor, product_id, "System", "WARNING", "LLM chain query returned invalid response; falling back to rules.")
+            llm_failed_flag = True
+            log_agent_action(cursor, product_id, "System", "WARNING", "[LLM Failure Fallback] All cloud LLM providers failed or rate-limited. Falling back to rules and flagging for HITL review.")
     else:
         log_agent_action(cursor, product_id, "System", "INFO", "Phase 7/8: LLM - Skipped (LLM spec extraction not required).")
 
@@ -1384,7 +1386,9 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
         trigger_hitl = True
         consistency_reasons.extend(validation_errors)
 
-
+    if llm_failed_flag:
+        trigger_hitl = True
+        consistency_reasons.append("All cloud LLM providers failed or rate-limited during spec extraction")
 
     scores = [item["confidence"] for item in extracted_data]
     avg_score = sum(scores) / len(scores) if scores else 0.85

@@ -97,6 +97,10 @@ def get_stats():
     
     avg_conf = cursor.execute("SELECT AVG(confidence_score) FROM products WHERE status != 'pending'").fetchone()[0] or 0.0
     
+    today_iso = datetime.now().strftime("%Y-%m-%d")
+    llm_calls_today = cursor.execute("SELECT COUNT(*) FROM llm_calls WHERE timestamp LIKE ?", (f"{today_iso}%",)).fetchone()[0]
+    llm_call_budget = SETTINGS.get("llm_call_budget", 50)
+
     conn.close()
     
     return {
@@ -106,7 +110,9 @@ def get_stats():
         "flagged_hitl": flagged,
         "completed": completed,
         "avg_confidence": round(avg_conf * 100, 1),
-        "is_bulk_running": IS_BULK_RUNNING
+        "is_bulk_running": IS_BULK_RUNNING,
+        "llm_calls_today": llm_calls_today,
+        "llm_call_budget": llm_call_budget
     }
 
 @app.get("/api/products")
@@ -259,7 +265,7 @@ def clear_all_parsed_input():
     return {"status": "ok", "message": f"Cleared all parsed input and reloaded {reloaded_count} pending items."}
 
 @app.post("/api/run-bulk")
-def run_bulk(background_tasks: BackgroundTasks, limit: int = 1000, llm_call_budget: Optional[int] = None):
+def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget: Optional[int] = None):
     global IS_BULK_RUNNING
     # Reset lock if stuck to allow user re-triggering smoothly
     IS_BULK_RUNNING = False
@@ -273,7 +279,7 @@ def run_bulk(background_tasks: BackgroundTasks, limit: int = 1000, llm_call_budg
         global IS_BULK_RUNNING
         try:
             while True:
-                processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 1000, budget)
+                processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 30, budget)
                 if processed == 0:
                     break
         finally:
@@ -281,7 +287,7 @@ def run_bulk(background_tasks: BackgroundTasks, limit: int = 1000, llm_call_budg
             
     IS_BULK_RUNNING = True
     background_tasks.add_task(bulk_wrapper)
-    return {"status": "processing", "message": f"Bulk enrichment started for all products with LLM budget of {budget} ({provider})"}
+    return {"status": "processing", "message": f"Bulk enrichment started for products (cap: {limit}) with LLM budget of {budget}"}
 
 class ResolveConflictRequest(BaseModel):
     conflict_id: int
@@ -405,28 +411,9 @@ def update_attributes(product_id: int, req: UpdateAttributesRequest):
     return {"status": "success", "message": "Attributes updated and product set to completed"}
 
 def query_ollama_ai_assist(prompt: str, model: str = "llama3") -> str:
-    """Dedicated Ollama query for AI Assist with higher token budget."""
-    import urllib.request, json, os
-    url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-    payload = {
-        "model": model,
-        "prompt": prompt,
-        "stream": False,
-        "format": "json",
-        "options": {"num_predict": 2048, "temperature": 0.1}
-    }
-    try:
-        req = urllib.request.Request(
-            f"{url}/api/generate",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"}
-        )
-        with urllib.request.urlopen(req, timeout=120) as response:
-            res_data = json.loads(response.read().decode("utf-8"))
-            return res_data.get("response", "").strip()
-    except Exception as e:
-        print(f"Ollama AI assist query failed: {e}")
-        return None
+    """Unified LLM query helper using the shared Gemini -> Groq -> OpenRouter failover chain."""
+    from backend.llm.llm_chain import query_llm_chain
+    return query_llm_chain(prompt, reason="AI Assist inline query", settings=load_settings())
 
 @app.post("/api/products/{product_id}/ai-assist")
 def ai_assist_product(product_id: int):

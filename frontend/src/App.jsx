@@ -150,8 +150,17 @@ export default function App() {
     processing: 0,
     flagged_hitl: 0,
     completed: 0,
-    avg_confidence: 0
+    avg_confidence: 0,
+    llm_calls_today: 0,
+    llm_call_budget: 50
   });
+
+  // Non-blocking Toast notification system
+  const [toast, setToast] = useState(null);
+  const showToast = (text, type = 'info') => {
+    setToast({ text, type });
+    setTimeout(() => setToast(null), 3500);
+  };
 
   const [extraStats, setExtraStats] = useState({
     easy: 0,
@@ -628,11 +637,12 @@ export default function App() {
   const handleRunBulkEnrichment = async () => {
     try {
       setIsBulkProcessing(true);
-      const res = await fetch('/api/run-bulk?limit=1000', { method: 'POST' });
+      const res = await fetch('/api/run-bulk?limit=30', { method: 'POST' });
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || "Enrichment failed");
       }
+      showToast("🚀 Catalog enrichment started (Demo Cap: Up to 30 products)", "success");
       setTimeout(() => {
         fetchStats();
         fetchProducts(currentPage);
@@ -640,7 +650,7 @@ export default function App() {
     } catch (err) {
       setIsBulkProcessing(false);
       console.error("Enrichment failed:", err);
-      alert(err.message || "Enrichment failed");
+      showToast(err.message || "Enrichment failed", "error");
     }
   };
 
@@ -655,13 +665,13 @@ export default function App() {
         throw new Error("Failed to clear parsed input");
       }
       const data = await res.json();
-      alert(data.message || "All parsed input cleared successfully!");
+      showToast(data.message || "All parsed input cleared successfully!", "success");
       fetchStats();
       fetchProducts(1);
       setCurrentPage(1);
     } catch (err) {
       console.error("Clear all failed:", err);
-      alert("Failed to clear parsed input.");
+      showToast("Failed to clear parsed input.", "error");
     }
   };
 
@@ -757,15 +767,17 @@ export default function App() {
         })
       });
       if (res.ok) {
+        showToast("✨ Conflict resolved successfully!", "success");
         setSelectedConflictProduct(null);
         fetchConflicts();
         fetchStats();
         fetchProducts(currentPage);
       } else {
-        alert("Failed to resolve product conflicts");
+        showToast("Failed to resolve product conflicts", "error");
       }
     } catch (err) {
       console.error("Error resolving conflicts:", err);
+      showToast("Error resolving conflicts", "error");
     }
   };
 
@@ -778,7 +790,7 @@ export default function App() {
       });
       if (!res.ok) {
         const errData = await res.json();
-        alert(errData.detail || "AI Assist request failed. Please check your Gemini API key in settings.");
+        showToast(errData.detail || "AI Assist request failed. Please check your API keys.", "error");
         return;
       }
       const data = await res.json();
@@ -790,9 +802,10 @@ export default function App() {
       if (data.short_desc) setConflictShortDesc(data.short_desc);
       if (data.long_desc) setConflictLongDesc(data.long_desc);
       if (data.attributes) setConflictAttributes(data.attributes);
+      showToast("✨ AI Assist suggestions updated inline!", "success");
     } catch (err) {
       console.error("Failed running AI Assist:", err);
-      alert("Error connecting to AI Assist API endpoint");
+      showToast("Error connecting to AI Assist API endpoint", "error");
     } finally {
       setIsAiAssisting(false);
     }
@@ -834,7 +847,7 @@ export default function App() {
             </button>
             {currentStage === 2 && (
               <button className="btn btn-primary" onClick={handleRunBulkEnrichment} disabled={isBulkProcessing || stats.processing > 0}>
-                <Play size={16} /> {isBulkProcessing || stats.processing > 0 ? "Enriching Products..." : "Run Catalog Enrichment"}
+                <Play size={16} /> {isBulkProcessing || stats.processing > 0 ? "Enriching Products..." : "Run Catalog Enrichment (Max 30 - Demo Cap)"}
               </button>
             )}
             {currentStage === 3 && (
@@ -932,16 +945,54 @@ export default function App() {
       {/* MAIN CONTENT AREA */}
       <div className="main-content" style={{ flexGrow: 1, overflowY: 'auto' }}>
         
+        {/* Floating Toast Notification Container */}
+        {toast && (
+          <div style={{
+            position: 'fixed',
+            top: '20px',
+            right: '24px',
+            zIndex: 9999,
+            padding: '12px 20px',
+            borderRadius: '12px',
+            background: toast.type === 'error' ? 'rgba(239, 68, 68, 0.95)' : toast.type === 'success' ? 'rgba(34, 197, 94, 0.95)' : 'rgba(30, 41, 59, 0.95)',
+            color: '#ffffff',
+            boxShadow: '0 10px 25px rgba(0,0,0,0.3)',
+            fontWeight: '600',
+            fontSize: '0.875rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            backdropFilter: 'blur(8px)',
+            border: '1px solid rgba(255,255,255,0.2)'
+          }}>
+            <Activity size={18} /> {toast.text}
+          </div>
+        )}
+
         {/* Dynamic Progress Indicator */}
         {renderPipelineProgress()}
 
         {/* --- DASHBOARD TAB --- */}
         {currentTab === 'dashboard' && (
           <div>
-            <div className="panel-header" style={{ marginBottom: '24px' }}>
+            <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
                 <h1>Platform Dashboard</h1>
                 <p className="subtitle" style={{ margin: 0 }}>Overview of product enrichment statistics and agent orchestration</p>
+              </div>
+              <div style={{
+                background: (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.9 ? 'rgba(239, 68, 68, 0.15)' : (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.7 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                color: (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.9 ? '#f87171' : (stats.llm_calls_today || 0) >= (stats.llm_call_budget || 50) * 0.7 ? '#fbbf24' : '#60a5fa',
+                padding: '6px 14px',
+                borderRadius: '8px',
+                fontWeight: '700',
+                fontSize: '0.825rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                border: '1px solid rgba(255,255,255,0.1)'
+              }}>
+                <Zap size={15} /> LLM Quota Today: {stats.llm_calls_today || 0} / {stats.llm_call_budget || 50} Calls
               </div>
             </div>
 
@@ -1319,7 +1370,7 @@ export default function App() {
                                           throw new Error(errMsg);
                                         }
                                         const data = await res.json();
-                                        alert(`✨ AI generated suggestions for ${data.updated_count} products! Please inspect the items below and click 'Batch Approve' when ready.`);
+                                        showToast(`✨ AI generated suggestions for ${data.updated_count} products!`, "success");
                                         await fetchConflicts();
                                         await fetchStats();
                                         if (selectedConflictProduct && itemIds.includes(selectedConflictProduct.product.id)) {
@@ -1328,7 +1379,7 @@ export default function App() {
                                           setSelectedConflictProduct(updatedProduct);
                                         }
                                       } catch (err) {
-                                        alert(err.message || "Batch AI Assist failed");
+                                        showToast(err.message || "Batch AI Assist failed", "error");
                                       } finally {
                                         setProcessingBatchKey(null);
                                       }
@@ -1358,10 +1409,11 @@ export default function App() {
                                           body: JSON.stringify({ product_ids: itemIds })
                                         });
                                         const data = await res.json();
+                                        showToast(`✅ Batch approved ${itemIds.length} products!`, "success");
                                         fetchConflicts();
                                         fetchStats();
                                       } catch (err) {
-                                        alert("Batch approval failed");
+                                        showToast("Batch approval failed", "error");
                                       }
                                     }}
                                     style={{
