@@ -99,14 +99,14 @@ def query_gemini_provider(prompt, api_key=None, model_name=None, timeout=8):
     if not api_key:
         return (401, "No Gemini API key provided")
         
-    requested_model = model_name or os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+    requested_model = model_name or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
     if requested_model.startswith("models/"):
         requested_model = requested_model[7:]
-    if requested_model in ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"]:
-        requested_model = "gemini-1.5-flash"
+    if requested_model in ["gemini-1.5-flash", "gemini-3.5-flash", "gemini-flash-latest"]:
+        requested_model = "gemini-2.5-flash"
 
     candidate_models = [requested_model]
-    for alt in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]:
+    for alt in ["gemini-2.5-flash", "gemini-3.1-flash-lite", "gemini-3.7-flash"]:
         if alt not in candidate_models:
             candidate_models.append(alt)
 
@@ -300,10 +300,11 @@ def query_llm_chain(prompt, product_id=None, reason="semantic extraction", setti
         chain = [p for p in chain if p != "ollama"]
 
     gemini_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")
-    gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
-    if gemini_model in ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"]:
-        gemini_model = "gemini-1.5-flash"
+    gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    if gemini_model in ["gemini-1.5-flash", "gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"]:
+        gemini_model = "gemini-2.5-flash"
     
+    groq_key = settings.get("groq_api_key") or os.environ.get("GROQ_API_KEY", "")
     groq_model = settings.get("groq_model") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     if groq_model in ["gemma2-9b-it", "groq/compound"]:
         groq_model = "llama-3.3-70b-versatile"

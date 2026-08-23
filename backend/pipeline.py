@@ -1443,7 +1443,11 @@ def enrich_taxonomy_batch_with_llm(batch, api_key=None, llm_provider="gemini", o
     from backend.llm.llm_chain import query_llm_chain
     prompt = build_batch_enrichment_prompt(batch)
     
-    res_text = query_llm_chain(prompt, reason="taxonomy batch enrichment")
+    try:
+        res_text = query_llm_chain(prompt, reason="taxonomy batch enrichment")
+    except Exception as llm_err:
+        print("[Taxonomy Batch LLM Error] Exception calling query_llm_chain:", llm_err)
+        res_text = None
     
     llm_data_by_mpn = {}
     if res_text:
