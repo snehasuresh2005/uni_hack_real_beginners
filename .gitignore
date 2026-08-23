@@ -30,3 +30,6 @@ backend/settings.json
 .idea/
 .DS_Store
 Thumbs.db
+
+# Submodules & Local Utilities
+freellmapi/
