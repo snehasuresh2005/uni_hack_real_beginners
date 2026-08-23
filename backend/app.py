@@ -1086,12 +1086,18 @@ async def stream_logs():
     async def event_generator():
         import asyncio
         import json
+        import queue
         loop = asyncio.get_event_loop()
         try:
             while True:
-                # Fetch log entries non-blockingly from the broker queue
-                log_entry = await loop.run_in_executor(None, q.get)
-                yield f"data: {json.dumps(log_entry)}\n\n"
+                try:
+                    # Fetch log entry with 1s timeout to release worker threads
+                    log_entry = await loop.run_in_executor(None, lambda: q.get(timeout=1.0))
+                    yield f"data: {json.dumps(log_entry)}\n\n"
+                except queue.Empty:
+                    # Send periodic SSE ping comment to maintain connection non-blockingly
+                    yield ": ping\n\n"
+                    await asyncio.sleep(0.5)
         except asyncio.CancelledError:
             pass
         finally:
