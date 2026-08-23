@@ -187,14 +187,14 @@ p.subtitle {
   font-weight: 500;
 }
 
-/* White Floating Cards (Soft Pastel Aesthetics) */
+/* White Floating Cards (Soft Pastel Aesthetics - Standardized Dashboard Reference) */
 .glass-panel {
   background: var(--panel-glass);
   border: 1px solid var(--panel-border);
   border-radius: var(--border-radius);
-  padding: 18px 20px;
+  padding: 20px 24px;
   box-shadow: 0 8px 24px -4px rgba(100, 110, 160, 0.06);
-  margin-bottom: 16px;
+  margin-bottom: 24px;
   width: 100%;
   box-sizing: border-box;
   transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
