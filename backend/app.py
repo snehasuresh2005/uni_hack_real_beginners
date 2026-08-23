@@ -694,6 +694,10 @@ def batch_approve_products(req: BatchApproveRequest):
     cursor = conn.cursor()
     placeholders = ",".join("?" * len(req.product_ids))
     cursor.execute(f"UPDATE products SET status = 'completed', confidence_score = 1.0 WHERE id IN ({placeholders})", req.product_ids)
+    cursor.execute(f"UPDATE conflicts SET resolved = 1 WHERE product_id IN ({placeholders})", req.product_ids)
+    now_iso = datetime.now().isoformat()
+    for pid in req.product_ids:
+        cursor.execute("INSERT INTO agent_logs (product_id, agent_name, timestamp, message, level) VALUES (?, 'Human Reviewer', ?, 'Human reviewer batch-approved resolution.', 'SUCCESS')", (pid, now_iso))
     conn.commit()
     conn.close()
     return {"status": "success", "count": len(req.product_ids), "message": f"Approved {len(req.product_ids)} products"}
@@ -821,16 +825,15 @@ Respond with ONLY a JSON array containing exactly {len(products)} objects in exa
                     now_iso = datetime.now().isoformat()
                     c.execute("""
                         UPDATE products
-                        SET status = 'completed', confidence_score = 0.92, ai_drafted = 1, resolved_brand = ?, resolved_manufacturer = ?,
+                        SET status = 'flagged_hitl', confidence_score = 0.90, ai_drafted = 1, resolved_brand = ?, resolved_manufacturer = ?,
                             classpath = ?, invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?,
                             mfr_url = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?, updated_at = ?
                         WHERE id = ?
                     """, (r_brd, r_mfr, clspath, inv_d, mob_d, sh_fmt, lng_fmt, mfr_url_val, r1, r2, r3, r4, r5, now_iso, p_id))
 
-                    c.execute("UPDATE conflicts SET resolved = 1 WHERE product_id = ?", (p_id,))
                     c.execute(
                         "INSERT INTO agent_logs (product_id, agent_name, timestamp, message, level) VALUES (?, ?, ?, ?, ?)",
-                        (p_id, "Batch AI Assist", now_iso, "Batch AI assistance resolved product conflict and marked completed.", "SUCCESS")
+                        (p_id, "Batch AI Assist", now_iso, "Batch AI assistance generated draft resolution for human review.", "INFO")
                     )
 
                     c.execute("DELETE FROM attributes WHERE product_id = ?", (p_id,))
@@ -867,11 +870,10 @@ Respond with ONLY a JSON array containing exactly {len(products)} objects in exa
                 c = conn.cursor()
                 now_iso = datetime.now().isoformat()
                 for p in products:
-                    c.execute("UPDATE products SET status = 'completed', confidence_score = 0.88, ai_drafted = 1, updated_at = ? WHERE id = ?", (now_iso, p["id"]))
-                    c.execute("UPDATE conflicts SET resolved = 1 WHERE product_id = ?", (p["id"],))
+                    c.execute("UPDATE products SET status = 'flagged_hitl', confidence_score = 0.88, ai_drafted = 1, updated_at = ? WHERE id = ?", (now_iso, p["id"]))
                     c.execute(
                         "INSERT INTO agent_logs (product_id, agent_name, timestamp, message, level) VALUES (?, ?, ?, ?, ?)",
-                        (p["id"], "Batch AI Assist", now_iso, "Batch AI assistance resolved product conflict via deterministic rule fallback.", "SUCCESS")
+                        (p["id"], "Batch AI Assist", now_iso, "Batch AI assistance generated draft resolution via rule fallback for human review.", "INFO")
                     )
                     updated_count += 1
                 conn.commit()
