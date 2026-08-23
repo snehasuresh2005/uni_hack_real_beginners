@@ -947,28 +947,28 @@ export default function App() {
 
             {/* Statistics Cards Grid */}
             <div className="stats-grid">
-              <div className="stat-card">
+              <div className="stat-card card-primary">
                 <div className="stat-icon primary"><Database size={24} /></div>
                 <div className="stat-info">
                   <span className="stat-label">Ingested Items</span>
                   <span className="stat-value">{stats.total}</span>
                 </div>
               </div>
-              <div className="stat-card">
+              <div className="stat-card card-warning">
                 <div className="stat-icon warning"><RotateCcw size={24} /></div>
                 <div className="stat-info">
                   <span className="stat-label">Pending Enrichment</span>
                   <span className="stat-value">{stats.pending}</span>
                 </div>
               </div>
-              <div className="stat-card">
+              <div className="stat-card card-success">
                 <div className="stat-icon success"><CheckCircle size={24} /></div>
                 <div className="stat-info">
                   <span className="stat-label">Enriched completed</span>
                   <span className="stat-value">{stats.completed}</span>
                 </div>
               </div>
-              <div className="stat-card">
+              <div className="stat-card card-danger">
                 <div className="stat-icon danger"><ShieldAlert size={24} /></div>
                 <div className="stat-info">
                   <span className="stat-label">HITL Conflicts</span>
