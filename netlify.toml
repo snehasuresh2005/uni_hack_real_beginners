@@ -6,7 +6,7 @@
 # Proxy /api calls directly to the Render backend service
 [[redirects]]
   from = "/api/*"
-  to = "https://unihack-backend.onrender.com/api/:splat"
+  to = "https://uni-hack-real-beginners.onrender.com/api/:splat"
   status = 200
   force = true
 
