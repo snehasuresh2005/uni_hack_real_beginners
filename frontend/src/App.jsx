@@ -23,7 +23,8 @@ import {
   Trash2,
   ExternalLink,
   FileText,
-  Globe
+  Globe,
+  Zap
 } from 'lucide-react';
 
 function PipelineStepTracker({ product, activePhase, isSkippedLLM }) {
