@@ -60,14 +60,36 @@ def normalize_brand(val):
         return "UNKNOWN"
     
     cleaned_norm = re.sub(r'[®™]', '', cleaned).strip()
+    c_lower = cleaned_norm.lower()
+    
+    from backend.ingestion.loader import CANONICAL_BRAND_MAP, BRAND_LIST
+    
+    # 1. Direct match against CANONICAL_BRAND_MAP
+    for k, v in CANONICAL_BRAND_MAP.items():
+        if k == c_lower or k in c_lower:
+            return v
+            
+    # 2. Case-insensitive match against BRAND_LIST
+    matched_brand = None
     for canonical in BRAND_LIST:
         canon_norm = re.sub(r'[®™]', '', canonical).strip()
-        if cleaned_norm.lower() == canon_norm.lower() or cleaned_norm.lower().startswith(canon_norm.lower()) or canon_norm.lower().startswith(cleaned_norm.lower()):
-            return canonical
+        if c_lower == canon_norm.lower() or c_lower.startswith(canon_norm.lower()) or canon_norm.lower().startswith(c_lower):
+            matched_brand = canonical
+            break
             
-    matches = difflib.get_close_matches(cleaned_norm, BRAND_LIST, n=1, cutoff=0.7)
-    if matches:
-        return matches[0]
+    if not matched_brand:
+        matches = difflib.get_close_matches(cleaned_norm, BRAND_LIST, n=1, cutoff=0.7)
+        if matches:
+            matched_brand = matches[0]
+            
+    if matched_brand:
+        mb_lower = matched_brand.lower()
+        for k, v in CANONICAL_BRAND_MAP.items():
+            if k == mb_lower or k in mb_lower:
+                return v
+        if not matched_brand.endswith("®") and not matched_brand.endswith("™"):
+            return matched_brand.upper() + "®"
+        return matched_brand
         
     return cleaned
 
@@ -108,3 +130,35 @@ def normalize_attribute_value(val, uom=""):
         cleaned = re.sub(rf'\s*{re.escape(normalize_uom(uom))}\b', '', cleaned, flags=re.I).strip()
         
     return cleaned
+
+def normalize_manufacturer_to_brand(val):
+    cleaned = normalize_placeholder(val)
+    if not cleaned:
+        return ""
+    
+    # 1. Strip trailing parenthetical codes e.g. "Kichler Lighting (KICLI)" -> "Kichler Lighting"
+    cleaned = re.sub(r'\s*\([^)]*\)', '', cleaned).strip()
+    
+    # 2. Strip slashes or sub-brand text generically if present e.g. "Brand A / Brand B"
+    if "/" in cleaned:
+        parts = [p.strip() for p in cleaned.split("/")]
+        cleaned = parts[0]
+    
+    # 3. Strip common legal, corporate, and business suffixes generically
+    legal_patterns = [
+        r'\bInc\.?\b', r'\bCo\.?\b', r'\bLtd\.?\b', r'\bCorp\.?\b', r'\bCorporation\b',
+        r'\bLLC\b', r'\bUSA\b', r'\bGroup\b', r'\bInternational\b', r'\bIntl\.?\b', r'\bMfg\.?\b',
+        r'\bCompany\b', r'\bProd\.?\b', r'\bProducts\b', r'\bSupply\b', r'\bIndustries\b'
+    ]
+    for pat in legal_patterns:
+        cleaned = re.sub(pat, '', cleaned, flags=re.I).strip()
+        
+    # Clean up punctuation and whitespace
+    cleaned = re.sub(r'[\s,-]+$', '', cleaned).strip()
+    cleaned = re.sub(r'^\s*[\s,-]+', '', cleaned).strip()
+    cleaned = re.sub(r'\s+', ' ', cleaned)
+    
+    return cleaned.strip()
+
+
+

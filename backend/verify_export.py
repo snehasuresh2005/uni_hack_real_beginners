@@ -56,7 +56,9 @@ def verify():
                     row.append(p["ref_url_4"] or "")
                 elif h == "Ref URL 5":
                     row.append(p["ref_url_5"] or "")
-                elif h in ["PART_NUMBER", "Mfg_Part_Num", "MANUFACTURER_PART_NUMBER"]:
+                elif h == "PART_NUMBER":
+                    row.append("") # Input dataset contains no internal SKU/PART_NUMBER column
+                elif h in ["Mfg_Part_Num", "MANUFACTURER_PART_NUMBER"]:
                     row.append(p["mfg_part_num"])
                 elif h == "Product Name":
                     row.append(p["product_name"] or "")

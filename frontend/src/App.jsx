@@ -20,7 +20,10 @@ import {
   Check,
   Activity,
   Plus,
-  Trash2
+  Trash2,
+  ExternalLink,
+  FileText,
+  Globe
 } from 'lucide-react';
 
 function PipelineStepTracker({ product, activePhase, isSkippedLLM }) {
@@ -237,13 +240,21 @@ export default function App() {
 
   // Connection settings
   const [connectionSettings, setConnectionSettings] = useState({
-    llm_provider: 'ollama',
+    llm_provider: 'auto',
     gemini_api_key: '',
-    ollama_model: 'llama3'
+    gemini_model: 'gemini-1.5-flash',
+    groq_api_key: '',
+    groq_model: 'llama-3.3-70b-versatile',
+    openrouter_api_key: '',
+    openrouter_model: 'meta-llama/llama-3.1-8b-instruct:free',
+    ollama_model: 'llama3',
+    enable_ollama_fallback: false,
+    llm_call_budget: 50
   });
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
   const [connectionTestResult, setConnectionTestResult] = useState(null);
   const [isAiAssisting, setIsAiAssisting] = useState(false);
+  const [processingBatchKey, setProcessingBatchKey] = useState(null);
 
   const currentPageRef = useRef(currentPage);
   const searchQueryRef = useRef(searchQuery);
@@ -335,10 +346,16 @@ export default function App() {
     fetchLogs();
     fetchSettings();
     
+    // Auto-refresh stats every 3s to keep UI metrics & button state in sync
+    const statsInterval = setInterval(() => {
+      fetchStats();
+    }, 3000);
+    
     return () => {
       if (eventSource) {
         eventSource.close();
       }
+      clearInterval(statsInterval);
     };
   }, []);
 
@@ -395,7 +412,7 @@ export default function App() {
 
   const fetchProducts = async (page = 1) => {
     try {
-      let url = `/api/products?page=${page}&limit=12`;
+      let url = `/api/products?page=${page}&limit=12&_t=${Date.now()}`;
       if (searchQuery) {
         url += `&q=${encodeURIComponent(searchQuery)}`;
       }
@@ -414,7 +431,7 @@ export default function App() {
   const fetchConflicts = async () => {
     try {
       // Fetch flagged products
-      const res = await fetch('/api/products?status=flagged_hitl&limit=100');
+      const res = await fetch(`/api/products?status=flagged_hitl&limit=100&_t=${Date.now()}`);
       const data = await res.json();
       setFlaggedProducts(data.data || []);
     } catch (err) {
@@ -437,9 +454,16 @@ export default function App() {
       const res = await fetch('/api/settings');
       const data = await res.json();
       setConnectionSettings({
-        llm_provider: data.llm_provider,
+        llm_provider: data.llm_provider || 'auto',
         gemini_api_key: data.gemini_api_key || '',
-        ollama_model: data.ollama_model || 'llama3'
+        gemini_model: data.gemini_model || 'gemini-1.5-flash',
+        groq_api_key: data.groq_api_key || '',
+        groq_model: data.groq_model || 'llama-3.3-70b-versatile',
+        openrouter_api_key: data.openrouter_api_key || '',
+        openrouter_model: data.openrouter_model || 'meta-llama/llama-3.1-8b-instruct:free',
+        ollama_model: data.ollama_model || 'llama3',
+        enable_ollama_fallback: !!data.enable_ollama_fallback,
+        llm_call_budget: data.llm_call_budget || 50
       });
     } catch (err) {
       console.error("Error fetching settings:", err);
@@ -604,16 +628,40 @@ export default function App() {
   const handleRunBulkEnrichment = async () => {
     try {
       setIsBulkProcessing(true);
-      const res = await fetch('/api/run-bulk?limit=50', { method: 'POST' });
+      const res = await fetch('/api/run-bulk?limit=1000', { method: 'POST' });
       if (!res.ok) {
         const errorData = await res.json();
         throw new Error(errorData.detail || "Enrichment failed");
       }
-      fetchStats();
+      setTimeout(() => {
+        fetchStats();
+        fetchProducts(currentPage);
+      }, 1000);
     } catch (err) {
       setIsBulkProcessing(false);
       console.error("Enrichment failed:", err);
       alert(err.message || "Enrichment failed");
+    }
+  };
+
+  const handleClearAllParsedInput = async () => {
+    if (!window.confirm("Are you sure you want to clear all parsed input and reset the dataset back to fresh pending state?")) {
+      return;
+    }
+    try {
+      setIsBulkProcessing(false);
+      const res = await fetch('/api/clear-all', { method: 'POST' });
+      if (!res.ok) {
+        throw new Error("Failed to clear parsed input");
+      }
+      const data = await res.json();
+      alert(data.message || "All parsed input cleared successfully!");
+      fetchStats();
+      fetchProducts(1);
+      setCurrentPage(1);
+    } catch (err) {
+      console.error("Clear all failed:", err);
+      alert("Failed to clear parsed input.");
     }
   };
 
@@ -781,6 +829,9 @@ export default function App() {
             </h2>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
+            <button className="btn" onClick={handleClearAllParsedInput} style={{ background: 'rgba(239, 68, 68, 0.15)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.3)', fontWeight: '600' }}>
+              <Trash2 size={16} /> Clear All Parsed Input
+            </button>
             {currentStage === 2 && (
               <button className="btn btn-primary" onClick={handleRunBulkEnrichment} disabled={isBulkProcessing || stats.processing > 0}>
                 <Play size={16} /> {isBulkProcessing || stats.processing > 0 ? "Enriching Products..." : "Run Catalog Enrichment"}
@@ -1196,31 +1247,177 @@ export default function App() {
                     🟢 No conflicts found! Stage checkpoint is completely verified.
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    {flaggedProducts.map(p => (
-                      <div 
-                        key={p.id}
-                        onClick={async () => {
-                          const res = await fetch(`/api/products/${p.id}`);
-                          const data = await res.json();
-                          setSelectedConflictProduct(data);
-                        }}
-                        style={{
-                          padding: '12px',
-                          background: selectedConflictProduct?.product?.id === p.id ? 'var(--primary-glow)' : 'rgba(255,255,255,0.01)',
-                          border: '1px solid',
-                          borderColor: selectedConflictProduct?.product?.id === p.id ? 'var(--primary)' : 'var(--border-glass)',
-                          borderRadius: '8px',
-                          cursor: 'pointer'
-                        }}
-                      >
-                        <div style={{ fontWeight: '700', color: 'var(--primary-hover)', fontSize: '0.85rem' }}>{p.mfg_part_num}</div>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '2px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
-                          {p.part_desc}
-                        </div>
+                  (() => {
+                    const brandGroups = {};
+                    flaggedProducts.forEach(p => {
+                      const rawBrand = p.resolved_brand && p.resolved_brand !== 'UNKNOWN' 
+                        ? p.resolved_brand 
+                        : (p.e1_brand || p.unilog_brand || p.dib_brand || p.resolved_manufacturer || p.part_manuf || 'Unclassified Brand');
+                      const key = rawBrand.trim();
+                      if (!brandGroups[key]) brandGroups[key] = [];
+                      brandGroups[key].push(p);
+                    });
+
+                    // Chunk each brand group into sub-batches of MAX 3 items
+                    const BATCH_SIZE = 3;
+                    const subBatches = [];
+
+                    Object.keys(brandGroups).forEach(brandName => {
+                      const items = brandGroups[brandName];
+                      for (let i = 0; i < items.length; i += BATCH_SIZE) {
+                        const chunk = items.slice(i, i + BATCH_SIZE);
+                        const subIndex = Math.floor(i / BATCH_SIZE) + 1;
+                        const totalSub = Math.ceil(items.length / BATCH_SIZE);
+                        subBatches.push({
+                          brandName,
+                          subIndex,
+                          totalSub,
+                          items: chunk
+                        });
+                      }
+                    });
+
+                    return (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', maxHeight: '75vh', overflowY: 'auto', paddingRight: '4px' }}>
+                        {subBatches.map((batchObj, bIdx) => {
+                          const { brandName, subIndex, totalSub, items } = batchObj;
+                          const itemIds = items.map(item => item.id);
+                          const subTitle = totalSub > 1 ? ` (Batch ${subIndex} of ${totalSub})` : '';
+                          const batchKey = `${brandName}-${subIndex}`;
+                          const isThisBatchProcessing = processingBatchKey === batchKey;
+
+                          return (
+                            <div key={batchKey} style={{ border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.5)', padding: '12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                                <div>
+                                  <div style={{ fontWeight: '700', fontSize: '0.85rem', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    🏷️ Brand Batch #{bIdx + 1}: {brandName}{subTitle}
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                    {items.length} item{items.length > 1 ? 's' : ''} in this batch (Max 3/prompt — Groq & Token Limit Safe)
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', gap: '6px' }}>
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      try {
+                                        setProcessingBatchKey(batchKey);
+                                        const res = await fetch('/api/batches/brand-ai-assist', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ product_ids: itemIds })
+                                        });
+                                        if (!res.ok) {
+                                          let errMsg = `Batch AI assist failed (${res.status})`;
+                                          try {
+                                            const errData = await res.json();
+                                            errMsg = errData.detail || errMsg;
+                                          } catch {
+                                            errMsg = `Server error ${res.status}: Please try again.`;
+                                          }
+                                          throw new Error(errMsg);
+                                        }
+                                        const data = await res.json();
+                                        alert(`✨ AI generated suggestions for ${data.updated_count} products! Please inspect the items below and click 'Batch Approve' when ready.`);
+                                        await fetchConflicts();
+                                        await fetchStats();
+                                        if (selectedConflictProduct && itemIds.includes(selectedConflictProduct.product.id)) {
+                                          const res = await fetch(`/api/products/${selectedConflictProduct.product.id}`);
+                                          const updatedProduct = await res.json();
+                                          setSelectedConflictProduct(updatedProduct);
+                                        }
+                                      } catch (err) {
+                                        alert(err.message || "Batch AI Assist failed");
+                                      } finally {
+                                        setProcessingBatchKey(null);
+                                      }
+                                    }}
+                                    disabled={!!processingBatchKey}
+                                    style={{
+                                      padding: '4px 8px',
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      borderRadius: '6px',
+                                      background: isThisBatchProcessing ? 'rgba(234, 179, 8, 0.2)' : 'rgba(139, 92, 246, 0.2)',
+                                      color: isThisBatchProcessing ? '#fde047' : '#c084fc',
+                                      border: isThisBatchProcessing ? '1px solid rgba(234, 179, 8, 0.4)' : '1px solid rgba(139, 92, 246, 0.4)',
+                                      cursor: processingBatchKey ? 'not-allowed' : 'pointer'
+                                    }}
+                                  >
+                                    {isThisBatchProcessing ? '⚡ Processing...' : '✨ Batch AI (1 API Call)'}
+                                  </button>
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      if (!confirm(`Approve all ${itemIds.length} products for '${brandName}'?`)) return;
+                                      try {
+                                        const res = await fetch('/api/batches/batch-approve', {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ product_ids: itemIds })
+                                        });
+                                        const data = await res.json();
+                                        fetchConflicts();
+                                        fetchStats();
+                                      } catch (err) {
+                                        alert("Batch approval failed");
+                                      }
+                                    }}
+                                    style={{
+                                      padding: '4px 8px',
+                                      fontSize: '0.7rem',
+                                      fontWeight: '600',
+                                      borderRadius: '6px',
+                                      background: 'rgba(34, 197, 94, 0.15)',
+                                      color: '#4ade80',
+                                      border: '1px solid rgba(34, 197, 94, 0.3)',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    ✅ Batch Approve
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {items.map(p => (
+                                  <div 
+                                    key={p.id}
+                                    onClick={async () => {
+                                      const res = await fetch(`/api/products/${p.id}`);
+                                      const data = await res.json();
+                                      setSelectedConflictProduct(data);
+                                    }}
+                                    style={{
+                                      padding: '8px 10px',
+                                      background: selectedConflictProduct?.product?.id === p.id ? 'var(--primary-glow)' : 'rgba(255,255,255,0.02)',
+                                      border: '1px solid',
+                                      borderColor: selectedConflictProduct?.product?.id === p.id ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                                      borderRadius: '6px',
+                                      cursor: 'pointer'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <div style={{ fontWeight: '700', color: 'var(--primary-hover)', fontSize: '0.8rem' }}>{p.mfg_part_num}</div>
+                                      {p.ai_drafted === 1 && (
+                                        <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(192, 132, 252, 0.2)', color: '#c084fc', border: '1px solid rgba(192, 132, 252, 0.4)', fontWeight: '600' }}>
+                                          ✨ AI Drafted — Review Needed
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                      {p.part_desc}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })()
                 )}
               </div>
 
@@ -1276,6 +1473,106 @@ export default function App() {
                       );
                     })()}
 
+                    {/* 🌐 Pre-AI Official Manufacturer Lookup (Token-Free Manual Verification) */}
+                    {selectedConflictProduct && selectedConflictProduct.product && (
+                      <div style={{
+                        background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.04) 100%)',
+                        border: '1px solid rgba(59, 130, 246, 0.35)',
+                        borderRadius: '10px',
+                        padding: '14px',
+                        marginBottom: '14px'
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', color: '#60a5fa', fontSize: '0.85rem' }}>
+                            <Globe size={18} color="#60a5fa" />
+                            <span>🌐 1-Click Official Manufacturer Lookup</span>
+                          </div>
+                          <span style={{ fontSize: '0.7rem', background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '2px 8px', borderRadius: '12px', fontWeight: '600' }}>
+                            ⚡ Zero Tokens / No AI Quota Used
+                          </span>
+                        </div>
+
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: '1.4' }}>
+                          Verify specifications directly on the official manufacturer portal to reduce AI quota usage.
+                        </div>
+                        
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {selectedConflictProduct.product.mfr_url ? (
+                            <div style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span style={{ color: '#93c5fd', fontWeight: '600' }}>Verified Product Page:</span>
+                              <a 
+                                href={selectedConflictProduct.product.mfr_url} 
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: '700', wordBreak: 'break-all', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                              >
+                                {selectedConflictProduct.product.mfr_url} <ExternalLink size={12} />
+                              </a>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Direct URL unmapped. Search official manufacturer portal:</span>
+                              <a 
+                                href={`https://www.google.com/search?q=${encodeURIComponent((selectedConflictProduct.product.resolved_brand || selectedConflictProduct.product.part_manuf || '') + ' ' + selectedConflictProduct.product.mfg_part_num + ' official site spec sheet')}`}
+                                target="_blank" 
+                                rel="noopener noreferrer" 
+                                style={{ 
+                                  fontSize: '0.73rem', 
+                                  background: 'rgba(59, 130, 246, 0.2)', 
+                                  color: '#60a5fa', 
+                                  border: '1px solid rgba(59, 130, 246, 0.4)', 
+                                  padding: '4px 10px', 
+                                  borderRadius: '6px', 
+                                  textDecoration: 'none', 
+                                  fontWeight: '600', 
+                                  display: 'inline-flex', 
+                                  alignItems: 'center', 
+                                  gap: '4px' 
+                                }}
+                              >
+                                <Search size={12} /> Search {selectedConflictProduct.product.resolved_brand || selectedConflictProduct.product.part_manuf || 'Mfr'} Portal <ExternalLink size={11} />
+                              </a>
+                            </div>
+                          )}
+
+                          {[
+                            selectedConflictProduct.product.ref_url_1,
+                            selectedConflictProduct.product.ref_url_2,
+                            selectedConflictProduct.product.ref_url_3,
+                            selectedConflictProduct.product.ref_url_4,
+                            selectedConflictProduct.product.ref_url_5
+                          ].filter(Boolean).length > 0 && (
+                            <div style={{ marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                              <div style={{ fontSize: '0.73rem', fontWeight: '600', color: '#c084fc', marginBottom: '6px' }}>
+                                📄 Official Spec Manuals & PDFs:
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                                {[
+                                  selectedConflictProduct.product.ref_url_1,
+                                  selectedConflictProduct.product.ref_url_2,
+                                  selectedConflictProduct.product.ref_url_3,
+                                  selectedConflictProduct.product.ref_url_4,
+                                  selectedConflictProduct.product.ref_url_5
+                                ].filter(Boolean).map((pdfUrl, idx) => (
+                                  <a 
+                                    key={idx}
+                                    href={pdfUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    style={{ fontSize: '0.75rem', color: '#c084fc', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                                  >
+                                    <FileText size={13} color="#c084fc" /> 
+                                    <span>Doc #{idx + 1}: {pdfUrl.split('/').pop() || pdfUrl}</span>
+                                    <ExternalLink size={11} />
+                                  </a>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     {/* ✨ AI Resolution Assistant Widget */}
                     <div style={{
                       background: 'rgba(139, 92, 246, 0.06)',
@@ -1298,10 +1595,10 @@ export default function App() {
                       `}} />
                       <div style={{ flexGrow: 1 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: '700', color: '#c084fc', fontSize: '0.85rem' }}>
-                          ✨ AI Resolution Assistant
+                          ✨ AI Resolution Assistant (Secondary Backup)
                         </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px', lineHeight: '1.3' }}>
-                          Query Gemini to analyze description & suggest Category Classpath, brand, and spec attributes.
+                          Only use if official manufacturer portal lookup above is insufficient.
                         </div>
                       </div>
                       <button 
@@ -1541,53 +1838,148 @@ export default function App() {
 
         {/* --- SETTINGS TAB --- */}
         {currentTab === 'settings' && (
-          <div className="glass-panel" style={{ maxWidth: '600px', margin: '0 auto' }}>
+          <div className="glass-panel" style={{ maxWidth: '680px', margin: '0 auto' }}>
             <div className="panel-header" style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '24px' }}>
-              <h2 className="panel-title"><SettingsIcon size={20} color="#8b5cf6" /> System Connection Settings</h2>
+              <h2 className="panel-title"><SettingsIcon size={20} color="#8b5cf6" /> System Connection & LLM Redundancy Chain Settings</h2>
             </div>
 
-            <div className="form-group" style={{ marginBottom: '16px' }}>
-              <label className="form-label">Active LLM Provider Engine</label>
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label className="form-label">Active Provider Selection Strategy</label>
               <select 
                 className="form-input" 
                 value={connectionSettings.llm_provider} 
                 onChange={e => setConnectionSettings({ ...connectionSettings, llm_provider: e.target.value })}
               >
-                <option value="gemini">Google Gemini AI Engine</option>
-                <option value="ollama">Local Ollama Server</option>
+                <option value="auto">Auto Failover Chain (Gemini → Groq → OpenRouter)</option>
+                <option value="gemini">Google Gemini AI Engine (Primary)</option>
+                <option value="groq">Groq Cloud AI Engine (Fallback 1)</option>
+                <option value="openrouter">OpenRouter Unified Engine (Fallback 2)</option>
+                <option value="ollama">Local Ollama Server (Dev Mode)</option>
               </select>
             </div>
 
-            {connectionSettings.llm_provider === 'gemini' ? (
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Google Gemini API Access Token</label>
-                <input 
-                  type="password" 
-                  className="form-input" 
-                  placeholder="Paste your Gemini API key (AIzaSy...)" 
-                  value={connectionSettings.gemini_api_key} 
-                  onChange={e => setConnectionSettings({ ...connectionSettings, gemini_api_key: e.target.value })} 
-                />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
+              {/* Google Gemini */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                <div style={{ fontWeight: '600', color: '#a78bfa', fontSize: '0.85rem', marginBottom: '8px' }}>Google Gemini</div>
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>API Key</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="AQ.Ab8..." 
+                    value={connectionSettings.gemini_api_key} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, gemini_api_key: e.target.value })} 
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Model</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={connectionSettings.gemini_model} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, gemini_model: e.target.value })} 
+                  />
+                </div>
               </div>
-            ) : (
-              <div className="form-group" style={{ marginBottom: '16px' }}>
-                <label className="form-label">Local Ollama Model ID</label>
-                <input 
-                  type="text" 
-                  className="form-input" 
-                  placeholder="Model name (e.g. llama3, llama3.1, mistral)" 
-                  value={connectionSettings.ollama_model} 
-                  onChange={e => setConnectionSettings({ ...connectionSettings, ollama_model: e.target.value })} 
-                />
+
+              {/* Groq Cloud */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                <div style={{ fontWeight: '600', color: '#38bdf8', fontSize: '0.85rem', marginBottom: '8px' }}>Groq Cloud</div>
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>API Key</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="gsk_..." 
+                    value={connectionSettings.groq_api_key} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, groq_api_key: e.target.value })} 
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Model</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    value={connectionSettings.groq_model} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, groq_model: e.target.value })} 
+                  />
+                  <span style={{ fontSize: '0.68rem', color: '#38bdf8', marginTop: '4px', display: 'block' }}>
+                    ⚡ Payload limit guarded (Max 3500 chars / 750 tokens per prompt)
+                  </span>
+                </div>
               </div>
-            )}
+
+              {/* OpenRouter */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                <div style={{ fontWeight: '600', color: '#f43f5e', fontSize: '0.85rem', marginBottom: '8px' }}>OpenRouter (Free Tier)</div>
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>API Key</label>
+                  <input 
+                    type="password" 
+                    className="form-input" 
+                    placeholder="sk-or-v1-..." 
+                    value={connectionSettings.openrouter_api_key} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, openrouter_api_key: e.target.value })} 
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Free Model ID</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="openrouter/auto"
+                    value={connectionSettings.openrouter_model} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, openrouter_model: e.target.value })} 
+                  />
+                </div>
+              </div>
+
+              {/* Ollama Local */}
+              <div style={{ background: 'rgba(255,255,255,0.02)', padding: '14px', borderRadius: '8px', border: '1px solid var(--border-glass)' }}>
+                <div style={{ fontWeight: '600', color: '#10b981', fontSize: '0.85rem', marginBottom: '8px' }}>Local Ollama (Dev)</div>
+                <div className="form-group" style={{ marginBottom: '8px' }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem' }}>Local Model ID</label>
+                  <input 
+                    type="text" 
+                    className="form-input" 
+                    placeholder="llama3" 
+                    value={connectionSettings.ollama_model} 
+                    onChange={e => setConnectionSettings({ ...connectionSettings, ollama_model: e.target.value })} 
+                  />
+                </div>
+                <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <input 
+                    type="checkbox" 
+                    id="enable_ollama" 
+                    checked={connectionSettings.enable_ollama_fallback}
+                    onChange={e => setConnectionSettings({ ...connectionSettings, enable_ollama_fallback: e.target.checked })} 
+                  />
+                  <label htmlFor="enable_ollama" style={{ fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text-main)' }}>Enable Local Ollama Dev Fallback</label>
+                </div>
+              </div>
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '20px' }}>
+              <label className="form-label">Bulk Enrichment LLM Call Budget Cap</label>
+              <input 
+                type="number" 
+                className="form-input" 
+                min="0"
+                value={connectionSettings.llm_call_budget} 
+                onChange={e => setConnectionSettings({ ...connectionSettings, llm_call_budget: parseInt(e.target.value, 10) || 0 })} 
+              />
+              <span style={{ fontSize: '0.7rem', color: 'var(--text-dark)', marginTop: '4px', display: 'block' }}>
+                Caps total LLM API calls combined across all providers during a single bulk run.
+              </span>
+            </div>
 
             <div style={{ display: 'flex', gap: '10px', marginTop: '24px' }}>
               <button className="btn btn-primary" onClick={handleUpdateSettings}>
-                Apply Configuration parameters
+                Apply Configuration Parameters
               </button>
               <button className="btn btn-secondary" onClick={handleTestConnection}>
-                Test System Connectivity
+                Test Provider Connectivity
               </button>
             </div>
 
@@ -1793,6 +2185,79 @@ export default function App() {
                 </tbody>
               </table>
             </div>
+
+            {/* 🌐 Official Manufacturer Verification Links for Self-Verification */}
+            {selectedProduct && (
+              <div style={{
+                marginBottom: '24px',
+                background: 'rgba(59, 130, 246, 0.06)',
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                borderRadius: '8px',
+                padding: '14px'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <Globe size={16} color="#60a5fa" />
+                  <span style={{ fontSize: '0.85rem', fontWeight: '700', color: '#60a5fa' }}>
+                    🌐 Official Manufacturer Verification Links
+                  </span>
+                </div>
+                
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {selectedProduct.mfr_url ? (
+                    <div style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: '600' }}>Manufacturer Product Page:</span>
+                      <a 
+                        href={selectedProduct.mfr_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        style={{ color: '#38bdf8', textDecoration: 'underline', fontWeight: '600', wordBreak: 'break-all', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        {selectedProduct.mfr_url} <ExternalLink size={12} />
+                      </a>
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                      No direct manufacturer URL available.
+                    </div>
+                  )}
+
+                  {[
+                    selectedProduct.ref_url_1,
+                    selectedProduct.ref_url_2,
+                    selectedProduct.ref_url_3,
+                    selectedProduct.ref_url_4,
+                    selectedProduct.ref_url_5
+                  ].filter(Boolean).length > 0 && (
+                    <div style={{ marginTop: '6px', borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: '8px' }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', marginBottom: '6px' }}>
+                        📄 Reference Manuals & Spec PDFs:
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {[
+                          selectedProduct.ref_url_1,
+                          selectedProduct.ref_url_2,
+                          selectedProduct.ref_url_3,
+                          selectedProduct.ref_url_4,
+                          selectedProduct.ref_url_5
+                        ].filter(Boolean).map((pdfUrl, idx) => (
+                          <a 
+                            key={idx}
+                            href={pdfUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ fontSize: '0.75rem', color: '#c084fc', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+                          >
+                            <FileText size={13} color="#c084fc" /> 
+                            <span>Doc #{idx + 1}: {pdfUrl.split('/').pop() || pdfUrl}</span>
+                            <ExternalLink size={11} />
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Product Ingestion Agent Logs */}
             <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '20px', marginBottom: '24px' }}>

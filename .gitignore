@@ -22,7 +22,7 @@ dist/
 .cache/
 
 # Databases
-backend/database.db
+backend/database.db*
 backend/settings.json
 
 # IDEs and System files

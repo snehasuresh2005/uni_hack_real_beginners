@@ -40,13 +40,27 @@ def run():
         env={**os.environ, "PYTHONPATH": workspace}
     )
     
+    # Wait for FastAPI backend to be ready on port 8000 before starting frontend
+    print("Waiting for FastAPI backend to accept connections on port 8000...")
+    import socket
+    for _ in range(30):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(1)
+            s.connect(("127.0.0.1", 8000))
+            s.close()
+            print("FastAPI backend is ready!")
+            break
+        except Exception:
+            time.sleep(0.5)
+            
     # 2. Start frontend Vite dev server
     frontend_dir = os.path.join(workspace, "frontend")
     print("Starting Vite frontend server...")
+    npx_cmd = "npx.cmd" if sys.platform == "win32" else "npx"
     frontend_proc = subprocess.Popen(
-        "npm run dev",
+        [npx_cmd, "vite", "--host", "127.0.0.1", "--port", "5173"],
         cwd=frontend_dir,
-        shell=True,
         env={**os.environ}
     )
     
@@ -77,10 +91,10 @@ def run():
     if gemini_key:
         freellm_env["FREEAPI_CONFIG_JSON"] = '{"keys":[{"platform":"google","key":"' + gemini_key + '"}]}'
     freellm_proc = subprocess.Popen(
-        ["npm", "run", "dev", "-w", "server"],
+        "npm run dev -w server",
         cwd=freellm_dir,
-        env=freellm_env,
-        shell=True
+        shell=True,
+        env=freellm_env
     )
     
     time.sleep(3)
@@ -107,16 +121,10 @@ def run():
     print("--------------------------------------------------")
     
     try:
-        # Keep running and print logs
+        # Keep running while backend is alive
         while True:
             if backend_proc.poll() is not None:
-                print("Backend terminated.")
-                break
-            if frontend_proc.poll() is not None:
-                print("Frontend terminated.")
-                break
-            if freellm_proc.poll() is not None:
-                print("freellmapi terminated.")
+                print("Backend server terminated.")
                 break
             time.sleep(1)
     except KeyboardInterrupt:

@@ -332,20 +332,15 @@ def get_brand_domain(brand):
         return f"{clean}.com"
     return None
 
-def build_mfr_url(mpn, brand):
-    if pd.isna(brand):
-        return np.nan
-    b = str(brand).lower().replace("\u00ae","").replace("®", "")
-    if 'frigidaire' in b: return f"https://www.frigidaire.com/en/p/owner-center/product-support/{mpn}"
-    if 'whirlpool' in b: return f"https://learnwhirlpool.com/smartsearchresults?searchtext={mpn}"
-    if 'milwaukee' in b: return f"https://www.milwaukeetool.com/product/{mpn}"
-    if 'diablo' in b or 'freud' in b: return f"https://www.freudtools.com/product/{mpn}"
-    if '3m' in b: return f"https://www.3m.com/product/{mpn}"
-    
-    dom = get_brand_domain(brand)
-    if dom:
-        return f"https://www.{dom}/product/{mpn}"
-    return np.nan
+def build_mfr_url(mpn, brand, manuf=""):
+    if pd.isna(brand) and pd.isna(manuf):
+        return np.nan, []
+    from backend.matching.mfr_url_resolver import resolve_product_urls
+    res = resolve_product_urls(str(manuf), str(brand), str(mpn))
+    mfr_url = res.get("mfr_url") or np.nan
+    ref_urls = res.get("ref_urls") or []
+    return mfr_url, ref_urls
+
 
 # ──────────────────────────────────────────────
 # Description Builders

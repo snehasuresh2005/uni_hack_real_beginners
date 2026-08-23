@@ -146,7 +146,7 @@ def init_db():
         "ref_url_1": "TEXT", "ref_url_2": "TEXT", "ref_url_3": "TEXT", "ref_url_4": "TEXT",
         "ref_url_5": "TEXT", "product_image": "TEXT", "specification_sheet": "TEXT",
         "fingerprint": "TEXT", "difficulty_level": "TEXT", "difficulty_score": "REAL",
-        "difficulty_reasons": "TEXT",
+        "difficulty_reasons": "TEXT", "ai_drafted": "INTEGER DEFAULT 0"
     }
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(products)")}
     for col, column_type in product_columns.items():
@@ -211,6 +211,23 @@ def init_db():
     )
     """)
     
+    # AI Knowledge Cache table for learned resolution patterns & web references
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS ai_knowledge_cache (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        pattern_key TEXT UNIQUE,
+        part_manuf TEXT,
+        mfg_prefix TEXT,
+        resolved_brand TEXT,
+        resolved_manufacturer TEXT,
+        classpath TEXT,
+        web_urls TEXT,
+        attributes_json TEXT,
+        source TEXT,
+        created_at TEXT
+    )
+    """)
+    
     # Indexes used by upload, enrichment, and dashboard queries.
     cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_products_mfg_part_num ON products (mfg_part_num);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_products_status ON products (status);")
@@ -219,6 +236,8 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_agent_logs_product_id ON agent_logs (product_id, id);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_conflicts_product_id ON conflicts (product_id, resolved);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_llm_calls_timestamp ON llm_calls (timestamp);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_pattern ON ai_knowledge_cache (pattern_key);")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_manuf ON ai_knowledge_cache (part_manuf);")
 
     # Audit data is useful, but unbounded prompt/response and event retention is not.
     retention_days = int(os.environ.get("AUDIT_LOG_RETENTION_DAYS", "30"))

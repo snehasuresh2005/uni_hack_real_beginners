@@ -19,18 +19,31 @@ init_db()
 app = FastAPI(title="AI Product Intelligence API")
 
 # Configure CORS
+allowed_origins_env = os.environ.get("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+else:
+    origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+
 class ConnectionSettings(BaseModel):
-    llm_provider: str
+    llm_provider: str = "auto"
     gemini_api_key: Optional[str] = ""
+    gemini_model: Optional[str] = "gemini-3.5-flash"
+    groq_api_key: Optional[str] = ""
+    groq_model: Optional[str] = "groq/compound"
+    openrouter_api_key: Optional[str] = ""
+    openrouter_model: Optional[str] = "meta-llama/llama-3.3-70b-instruct"
     ollama_model: Optional[str] = "llama3"
+    enable_ollama_fallback: bool = False
     llm_call_budget: int = 50
 
 class IngestBatchRequest(BaseModel):
@@ -42,9 +55,15 @@ SETTINGS_PATH = os.path.join(os.path.dirname(__file__), "settings.json")
 
 def load_settings():
     defaults = {
-        "llm_provider": os.environ.get("LLM_PROVIDER", "gemini"),
+        "llm_provider": os.environ.get("LLM_PROVIDER", "auto"),
         "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
+        "gemini_model": os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
+        "groq_api_key": os.environ.get("GROQ_API_KEY", ""),
+        "groq_model": os.environ.get("GROQ_MODEL", "groq/compound"),
+        "openrouter_api_key": os.environ.get("OPENROUTER_API_KEY", ""),
+        "openrouter_model": os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct"),
         "ollama_model": os.environ.get("OLLAMA_MODEL", "llama3"),
+        "enable_ollama_fallback": os.environ.get("ENABLE_OLLAMA_FALLBACK", "false").lower() == "true",
         "llm_call_budget": int(os.environ.get("LLM_CALL_BUDGET", "50"))
     }
     if os.path.exists(SETTINGS_PATH):
@@ -122,6 +141,31 @@ def list_products(status: Optional[str] = None, q: Optional[str] = None, page: i
         "limit": limit
     }
 
+@app.get("/api/batches/flagged")
+def get_flagged_batches():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    flagged = cursor.execute("SELECT * FROM products WHERE status = 'flagged_hitl' ORDER BY id").fetchall()
+    conn.close()
+    
+    flagged_dicts = [dict(row) for row in flagged]
+    from backend.pipeline import group_products_by_taxonomy
+    batches = group_products_by_taxonomy(flagged_dicts, batch_size=3)
+    
+    formatted_batches = []
+    for idx, b in enumerate(batches):
+        taxonomy = b[0].get("classpath") or b[0].get("_classpath") or b[0].get("category") or "General Industrial Products"
+        mfr = b[0].get("resolved_manufacturer") or b[0].get("_resolved_mfr") or b[0].get("part_manuf") or "Generic"
+        formatted_batches.append({
+            "batch_id": f"batch_{idx+1}",
+            "taxonomy": taxonomy,
+            "manufacturer": mfr,
+            "count": len(b),
+            "products": b
+        })
+        
+    return {"batches": formatted_batches, "total_flagged": len(flagged_dicts)}
+
 @app.get("/api/products/{product_id}")
 def get_product(product_id: int):
     conn = get_db_connection()
@@ -168,27 +212,76 @@ def trigger_enrichment(product_id: int, background_tasks: BackgroundTasks):
     background_tasks.add_task(enrich_wrapper)
     return {"status": "processing", "message": f"Enrichment pipeline started ({provider})"}
 
+@app.post("/api/reset-bulk-lock")
+def reset_bulk_lock():
+    global IS_BULK_RUNNING, PROCESSING_PRODUCTS
+    IS_BULK_RUNNING = False
+    PROCESSING_PRODUCTS.clear()
+    return {"status": "ok", "message": "Bulk pipeline state reset successfully."}
+
+@app.post("/api/clear-all")
+def clear_all_parsed_input():
+    global IS_BULK_RUNNING, PROCESSING_PRODUCTS
+    IS_BULK_RUNNING = False
+    PROCESSING_PRODUCTS.clear()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM products")
+    cursor.execute("DELETE FROM attributes")
+    cursor.execute("DELETE FROM agent_logs")
+    cursor.execute("DELETE FROM conflicts")
+    conn.commit()
+
+    import pandas as pd
+    from datetime import datetime
+    input_csv = os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv")
+    reloaded_count = 0
+    if os.path.exists(input_csv):
+        df = pd.read_csv(input_csv)
+        now = datetime.now().isoformat()
+        for _, row in df.iterrows():
+            mpn = str(row["Mfg_Part_Num"])
+            desc = str(row["Part_Desc"])
+            e1 = str(row.get("E1_Brand", ""))
+            unilog = str(row.get("Unilog_Brand", ""))
+            dib = str(row.get("DIB_Brand", ""))
+            manuf = str(row.get("Part_Manuf", ""))
+            cursor.execute("""
+                INSERT OR IGNORE INTO products 
+                (mfg_part_num, part_desc, e1_brand, unilog_brand, dib_brand, part_manuf, status, ai_drafted, created_at, updated_at) 
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
+            """, (mpn, desc, e1, unilog, dib, manuf, now, now))
+            reloaded_count += 1
+        conn.commit()
+
+    conn.close()
+    return {"status": "ok", "message": f"Cleared all parsed input and reloaded {reloaded_count} pending items."}
+
 @app.post("/api/run-bulk")
-def run_bulk(background_tasks: BackgroundTasks, limit: int = 10, llm_call_budget: Optional[int] = None):
+def run_bulk(background_tasks: BackgroundTasks, limit: int = 1000, llm_call_budget: Optional[int] = None):
     global IS_BULK_RUNNING
-    if IS_BULK_RUNNING:
-        raise HTTPException(status_code=400, detail="A bulk enrichment task is already running in the background.")
+    # Reset lock if stuck to allow user re-triggering smoothly
+    IS_BULK_RUNNING = False
         
     key = SETTINGS.get("gemini_api_key")
     provider = SETTINGS.get("llm_provider", "gemini")
     model = SETTINGS.get("ollama_model", "llama3")
-    budget = SETTINGS.get("llm_call_budget", 50) if llm_call_budget is None else llm_call_budget
+    budget = SETTINGS.get("llm_call_budget", 10000) if llm_call_budget is None else llm_call_budget
     
     def bulk_wrapper():
         global IS_BULK_RUNNING
         try:
-            run_bulk_enrichment(key, provider, model, limit, budget)
+            while True:
+                processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 1000, budget)
+                if processed == 0:
+                    break
         finally:
             IS_BULK_RUNNING = False
             
     IS_BULK_RUNNING = True
     background_tasks.add_task(bulk_wrapper)
-    return {"status": "processing", "message": f"Bulk enrichment for up to {limit} products started with an LLM budget of {budget} ({provider})"}
+    return {"status": "processing", "message": f"Bulk enrichment started for all products with LLM budget of {budget} ({provider})"}
 
 class ResolveConflictRequest(BaseModel):
     conflict_id: int
@@ -294,6 +387,21 @@ def update_attributes(product_id: int, req: UpdateAttributesRequest):
     conn.commit()
     conn.close()
     
+    # Save to AI Knowledge Cache for future similar items
+    try:
+        from backend.matching.ai_knowledge_cache import save_knowledge_cache
+        save_knowledge_cache(
+            part_manuf=req.resolved_manufacturer or "",
+            mfg_part_num="",
+            resolved_brand=req.resolved_brand or "",
+            resolved_manufacturer=req.resolved_manufacturer or "",
+            classpath=req.classpath or "",
+            attributes=req.attributes,
+            source="human_resolution"
+        )
+    except Exception as cache_err:
+        print("Failed to save human resolution to AI knowledge cache:", cache_err)
+
     return {"status": "success", "message": "Attributes updated and product set to completed"}
 
 def query_ollama_ai_assist(prompt: str, model: str = "llama3") -> str:
@@ -333,6 +441,10 @@ def ai_assist_product(product_id: int):
     logs = conn.execute("SELECT * FROM agent_logs WHERE product_id = ? ORDER BY id DESC", (product_id,)).fetchall()
     conn.close()
     
+    # 1. Check AI Knowledge Cache first for similar manufacturer/pattern
+    from backend.matching.ai_knowledge_cache import lookup_knowledge_cache, save_knowledge_cache
+    cached_kb = lookup_knowledge_cache(product['part_manuf'], product['mfg_part_num'])
+    
     warning_logs = [l["message"] for l in logs if l["level"] == "WARNING"]
     warning_str = "; ".join(warning_logs) if warning_logs else "None"
 
@@ -340,10 +452,19 @@ def ai_assist_product(product_id: int):
     attr_list = [f"{a['label']}: {a['value']} {a['uom'] or ''}" for a in attributes]
     attrs_str = ", ".join(attr_list) if attr_list else "None"
 
-    prompt = f"""You are an AI data enrichment assistant for B2B industrial product catalogs.
-Analyze this product and return COMPLETE enrichment data as JSON. You MUST always return valid JSON.
+    cached_hint = ""
+    if cached_kb:
+        cached_hint = (
+            f"\nLearned Knowledge Cache Match:\n"
+            f"- Preferred Brand Pattern: {cached_kb.get('resolved_brand')}\n"
+            f"- Preferred Manufacturer: {cached_kb.get('resolved_manufacturer')}\n"
+            f"- Preferred Classpath: {cached_kb.get('classpath')}\n"
+        )
 
-Product Data:
+    prompt = f"""You are an AI data enrichment assistant for B2B industrial product catalogs.
+Analyze this product payload and return COMPLETE enrichment data as JSON. You MUST always return valid JSON.
+
+Product Payload:
 - MPN (Part Number): {product['mfg_part_num']}
 - Raw Manufacturer: {product['part_manuf']}
 - E1 Brand: {product['e1_brand']}
@@ -354,32 +475,53 @@ Product Data:
 - Current Resolved Manufacturer: {product['resolved_manufacturer'] or 'UNKNOWN'}
 - Current Resolved Brand: {product['resolved_brand'] or 'UNKNOWN'}
 - Current Classpath: {product['classpath'] or 'UNKNOWN'}
-- Current Attributes: {attrs_str}
+- Current Attributes: {attrs_str}{cached_hint}
 
-TASK: Resolve ALL unknown/missing fields. Use your knowledge of industrial products to identify the brand, manufacturer, category, and specifications from the MPN and description.
+TASK: Resolve ALL unknown/missing fields for THIS SPECIFIC ITEM. Extract the true brand, manufacturer, category classpath, and specifications.
 
 Rules:
-1. resolved_brand: Identify the true brand from MPN prefix patterns, description keywords, or manufacturer name.
+1. resolved_brand: Identify the exact true brand from MPN prefix patterns, description keywords, or manufacturer name.
 2. resolved_manufacturer: Full legal manufacturer name, cleaned.
-3. classpath: Format as "Category>Subcategory" (e.g. "Abrasives>Sanding Discs", "Building Materials>Mortar & Grout").
-4. invoice_desc: Max 40 chars, ALL CAPS (e.g. "MIRKA HIOLIT 5IN P80 DISC").
-5. mobile_desc: 60-80 chars B2B marketing copy with brand and key specs.
+3. classpath: Format as "Category>Subcategory" (e.g. "Abrasives>Sanding Discs", "Building Materials>Mortar & Grout", "Hand Tools>Screwdrivers").
+4. invoice_desc: Max 40 chars, ALL CAPS (e.g. "<BRAND> <SERIES> <SPECS>").
+5. mobile_desc: 60-80 chars B2B marketing copy featuring the TRUE brand and key specs.
 6. short_desc: Brand + Series + MPN + product type + key specs.
-7. long_desc: 2-3 sentence professional product description.
+7. long_desc: 2-3 sentence professional product description for this item.
 8. attributes: ALL measurable specifications as label/value/uom objects.
+
+CRITICAL CONSTRAINTS:
+- Identify the brand and manufacturer ONLY from the product payload provided above.
+- DO NOT default to "Mirka" or any other hardcoded placeholder brand unless "Mirka" literally appears in the raw product payload.
 
 Respond with ONLY a JSON object, no extra text:
 {{"resolved_brand":"...","resolved_manufacturer":"...","classpath":"...","invoice_desc":"...","mobile_desc":"...","short_desc":"...","long_desc":"...","attributes":[{{"label":"...","value":"...","uom":"..."}}]}}"""
 
-    # Use local Ollama — no API key required, fully offline
-    from backend.llm.ollama_client import is_ollama_available
-    if not is_ollama_available():
-        raise HTTPException(status_code=503, detail="Ollama is not running. Start it with: ollama serve")
+    from backend.llm.llm_chain import query_llm_chain
+    res_text = query_llm_chain(prompt, product_id=product_id, reason="AI Assist resolution", settings=load_settings())
 
-    ollama_model = SETTINGS.get("ollama_model", "llama3")
-    res_text = query_ollama_ai_assist(prompt, ollama_model)
     if not res_text:
-        raise HTTPException(status_code=500, detail="Ollama returned no response. Make sure llama3 is pulled: ollama pull llama3")
+        # Fallback gracefully to deterministic pipeline enrichment for this product
+        from backend.pipeline import run_pipeline_for_product
+        run_pipeline_for_product(product_id)
+        conn = get_db_connection()
+        conn.row_factory = sqlite3.Row
+        updated_p = conn.execute("SELECT * FROM products WHERE id = ?", (product_id,)).fetchone()
+        attrs = conn.execute("SELECT * FROM attributes WHERE product_id = ?", (product_id,)).fetchall()
+        conn.close()
+
+        if updated_p:
+            return {
+                "resolved_brand": updated_p["resolved_brand"] or "UNKNOWN",
+                "resolved_manufacturer": updated_p["resolved_manufacturer"] or "UNKNOWN",
+                "classpath": updated_p["classpath"] or "General Industrial Products",
+                "invoice_desc": updated_p["invoice_desc"] or "",
+                "mobile_desc": updated_p["mobile_desc"] or "",
+                "short_desc": updated_p["short_desc"] or "",
+                "long_desc": updated_p["long_desc"] or "",
+                "attributes": [{"label": a["label"], "value": a["value"], "uom": a["uom"]} for a in attrs]
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Product not found after fallback enrichment.")
          
     def clean_and_parse_json(text):
         t = text.strip()
@@ -462,14 +604,261 @@ Respond with ONLY a JSON object, no extra text:
                         val = m.group(1)
                     fallback_dict[key] = val
             fallback_dict["attributes"] = []
-            return fallback_dict
-
     try:
         data = clean_and_parse_json(res_text)
+        
+        # Enforce strict 60-80 chars mobile_desc bound and enriched descriptions
+        from backend.pipeline import ensure_mobile_desc_bounds, format_enriched_descriptions
+        data["mobile_desc"] = ensure_mobile_desc_bounds(
+            data.get("mobile_desc"),
+            norm_mfr=data.get("resolved_manufacturer") or product['part_manuf'],
+            norm_brd=data.get("resolved_brand") or product['e1_brand'],
+            prod_name=product['part_desc'],
+            mpn=product['mfg_part_num'],
+            attributes=data.get("attributes", [])
+        )
+        sh_fmt, lng_fmt = format_enriched_descriptions(
+            resolved_brand=data.get("resolved_brand"),
+            resolved_manufacturer=data.get("resolved_manufacturer"),
+            mpn=product['mfg_part_num'],
+            part_desc=product['part_desc'],
+            short_desc=data.get("short_desc"),
+            long_desc=data.get("long_desc"),
+            attributes=data.get("attributes", [])
+        )
+        data["short_desc"] = sh_fmt
+        data["long_desc"] = lng_fmt
+        
+        # Resolve official manufacturer product URL & reference PDFs
+        from backend.matching.mfr_url_resolver import resolve_product_urls
+        url_res = resolve_product_urls(
+            part_manuf=data.get("resolved_manufacturer") or product['part_manuf'],
+            resolved_brand=data.get("resolved_brand") or product['e1_brand'],
+            mfg_part_num=product['mfg_part_num'],
+            part_desc=product['part_desc']
+        )
+        if url_res.get("mfr_url"):
+            data["mfr_url"] = url_res["mfr_url"]
+            ref_urls = url_res.get("ref_urls", [])
+            data["ref_url_1"] = ref_urls[0] if len(ref_urls) > 0 else ""
+            data["ref_url_2"] = ref_urls[1] if len(ref_urls) > 1 else ""
+            data["ref_url_3"] = ref_urls[2] if len(ref_urls) > 2 else ""
+            data["ref_url_4"] = ref_urls[3] if len(ref_urls) > 3 else ""
+            data["ref_url_5"] = ref_urls[4] if len(ref_urls) > 4 else ""
+        
+        # Save generated pattern to Knowledge Cache
+        try:
+            save_knowledge_cache(
+                part_manuf=product['part_manuf'],
+                mfg_part_num=product['mfg_part_num'],
+                resolved_brand=data.get("resolved_brand", ""),
+                resolved_manufacturer=data.get("resolved_manufacturer", ""),
+                classpath=data.get("classpath", ""),
+                web_urls=[product["mfr_url"]] if dict(product).get("mfr_url") else [],
+                attributes=data.get("attributes", []),
+                source="ai_assist"
+            )
+        except Exception as cache_save_err:
+            print("Failed saving AI Assist pattern to knowledge cache:", cache_save_err)
+            
         return data
     except Exception as e:
         print("Failed to parse Gemini response text:", res_text, e)
         raise HTTPException(status_code=500, detail=f"Failed to parse Gemini response as JSON: {e}")
+
+class BatchApproveRequest(BaseModel):
+    product_ids: List[int]
+
+@app.post("/api/batches/batch-approve")
+def batch_approve_products(req: BatchApproveRequest):
+    if not req.product_ids:
+        return {"status": "success", "count": 0}
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    placeholders = ",".join("?" * len(req.product_ids))
+    cursor.execute(f"UPDATE products SET status = 'completed', confidence_score = 1.0 WHERE id IN ({placeholders})", req.product_ids)
+    conn.commit()
+    conn.close()
+    return {"status": "success", "count": len(req.product_ids), "message": f"Approved {len(req.product_ids)} products"}
+
+class BatchAiAssistRequest(BaseModel):
+    product_ids: List[int]
+
+@app.post("/api/batches/brand-ai-assist")
+def batch_brand_ai_assist(req: BatchAiAssistRequest):
+    if not req.product_ids:
+        raise HTTPException(status_code=400, detail="No product IDs provided for batch AI assist.")
+
+    # Cap batch payload to max 3 items to prevent LLM rate/token limits
+    target_ids = req.product_ids[:3]
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    placeholders = ",".join("?" * len(target_ids))
+    rows = cursor.execute(f"SELECT * FROM products WHERE id IN ({placeholders})", target_ids).fetchall()
+    conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=404, detail="No products found for provided IDs.")
+
+    products = [dict(r) for r in rows]
+    sample = products[0]
+    brand_context = sample.get("resolved_brand") or sample.get("e1_brand") or sample.get("part_manuf") or "Catalog Brand"
+
+    items_text = []
+    for p in products:
+        items_text.append(f"""---
+PRODUCT ITEM (ID: {p['id']}):
+- MPN: {p.get('mfg_part_num', '')}
+- Raw Manufacturer: {p.get('part_manuf', '')}
+- Raw Description: {p.get('part_desc', '')}
+- Brand Fields: E1={p.get('e1_brand', '')}, Unilog={p.get('unilog_brand', '')}, DIB={p.get('dib_brand', '')}""")
+
+    items_joined = "\n".join(items_text)
+    prompt = f"""You are an expert B2B data enrichment AI assistant.
+Enrich the following {len(products)} products belonging to Brand / Manufacturer cluster '{brand_context}'.
+Process ALL items together in 1 single pass, resolving true brand, manufacturer, category classpath, descriptions, and spec attributes.
+
+PRODUCT PAYLOADS:
+{items_joined}
+
+Respond with ONLY a JSON array containing exactly {len(products)} objects in exact item order:
+[
+  {{
+    "id": {products[0]['id']},
+    "resolved_brand": "...",
+    "resolved_manufacturer": "...",
+    "classpath": "...",
+    "invoice_desc": "...",
+    "mobile_desc": "...",
+    "short_desc": "...",
+    "long_desc": "...",
+    "attributes": [{{"label": "...", "value": "...", "uom": "..."}}]
+  }}
+]"""
+
+    from backend.llm.llm_chain import query_llm_chain
+    from backend.pipeline import extract_balanced_json_array
+    res_text = query_llm_chain(prompt, reason="Batch Brand AI Assist", settings=load_settings())
+    
+    results_list = []
+    if res_text:
+        json_array_str = extract_balanced_json_array(res_text)
+        if json_array_str:
+            try:
+                results_list = json.loads(json_array_str)
+            except Exception:
+                pass
+
+    updated_count = 0
+    if results_list:
+        import time
+        for attempt in range(5):
+            try:
+                conn = get_db_connection()
+                c = conn.cursor()
+                for item in results_list:
+                    p_id = item.get("id")
+                    if not p_id:
+                        continue
+                    
+                    r_brd = item.get("resolved_brand") or "UNKNOWN"
+                    r_mfr = item.get("resolved_manufacturer") or "UNKNOWN"
+                    clspath = item.get("classpath") or "General Industrial Products"
+                    inv_d = str(item.get("invoice_desc") or "").upper()[:40]
+                    from backend.pipeline import ensure_mobile_desc_bounds, format_enriched_descriptions
+                    mob_raw = str(item.get("mobile_desc") or "")
+                    p_orig = next((p for p in products if p["id"] == p_id), {})
+                    mob_d = ensure_mobile_desc_bounds(
+                        mob_raw,
+                        norm_mfr=r_mfr or p_orig.get("part_manuf", ""),
+                        norm_brd=r_brd or p_orig.get("e1_brand", ""),
+                        prod_name=p_orig.get("part_desc", ""),
+                        mpn=p_orig.get("mfg_part_num", ""),
+                        attributes=item.get("attributes", [])
+                    )
+                    sh_fmt, lng_fmt = format_enriched_descriptions(
+                        resolved_brand=r_brd,
+                        resolved_manufacturer=r_mfr,
+                        mpn=p_orig.get("mfg_part_num", ""),
+                        part_desc=p_orig.get("part_desc", ""),
+                        short_desc=item.get("short_desc"),
+                        long_desc=item.get("long_desc"),
+                        attributes=item.get("attributes", [])
+                    )
+                    from backend.matching.mfr_url_resolver import resolve_product_urls
+                    url_res = resolve_product_urls(
+                        part_manuf=r_mfr or p_orig.get("part_manuf", ""),
+                        resolved_brand=r_brd or p_orig.get("e1_brand", ""),
+                        mfg_part_num=p_orig.get("mfg_part_num", ""),
+                        part_desc=p_orig.get("part_desc", "")
+                    )
+                    mfr_url_val = url_res.get("mfr_url", "")
+                    ref_urls = url_res.get("ref_urls", [])
+                    r1 = ref_urls[0] if len(ref_urls) > 0 else ""
+                    r2 = ref_urls[1] if len(ref_urls) > 1 else ""
+                    r3 = ref_urls[2] if len(ref_urls) > 2 else ""
+                    r4 = ref_urls[3] if len(ref_urls) > 3 else ""
+                    r5 = ref_urls[4] if len(ref_urls) > 4 else ""
+
+                    c.execute("""
+                        UPDATE products
+                        SET status = 'flagged_hitl', confidence_score = 0.90, ai_drafted = 1, resolved_brand = ?, resolved_manufacturer = ?,
+                            classpath = ?, invoice_desc = ?, mobile_desc = ?, short_desc = ?, long_desc = ?,
+                            mfr_url = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?
+                        WHERE id = ?
+                    """, (r_brd, r_mfr, clspath, inv_d, mob_d, sh_fmt, lng_fmt, mfr_url_val, r1, r2, r3, r4, r5, p_id))
+
+                    c.execute("DELETE FROM attributes WHERE product_id = ?", (p_id,))
+                    for ad in item.get("attributes", []):
+                        if isinstance(ad, dict) and ad.get("label"):
+                            c.execute("""
+                                INSERT INTO attributes (product_id, label, value, uom, confidence, source, citation)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            """, (p_id, ad["label"], str(ad.get("value", "")), str(ad.get("uom", "")), 0.95, "Batch Brand AI Assist", "LLM Single Pass"))
+                    updated_count += 1
+                conn.commit()
+                conn.close()
+                break
+            except sqlite3.OperationalError as op_err:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                if "locked" in str(op_err) or "busy" in str(op_err):
+                    time.sleep(0.1 * (2 ** attempt))
+                    continue
+                else:
+                    raise op_err
+    else:
+        # Fallback to deterministic rule enrichment for all items in batch
+        from backend.pipeline import run_pipeline_for_product
+        for p in products:
+            run_pipeline_for_product(p["id"])
+
+        import time
+        for attempt in range(5):
+            try:
+                conn = get_db_connection()
+                c = conn.cursor()
+                for p in products:
+                    c.execute("UPDATE products SET status = 'flagged_hitl', ai_drafted = 1 WHERE id = ?", (p["id"],))
+                    updated_count += 1
+                conn.commit()
+                conn.close()
+                break
+            except sqlite3.OperationalError as op_err:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+                if "locked" in str(op_err) or "busy" in str(op_err):
+                    time.sleep(0.1 * (2 ** attempt))
+                    continue
+                else:
+                    raise op_err
+
+    return {"status": "success", "updated_count": updated_count, "message": f"Enriched {updated_count} products in batch!"}
 
 @app.post("/api/ingest")
 async def ingest_csv(file: UploadFile = File(...)):
@@ -569,16 +958,48 @@ def ingest_batch(req: IngestBatchRequest):
     
     return {"status": "success", "imported": count, "message": f"Successfully ingested batch of {count} products"}
 
+def mask_api_key(key: Optional[str]) -> str:
+    if not key:
+        return ""
+    if key.startswith("***") or "..." in key:
+        return key
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:3]}...{key[-4:]}"
+
+def is_masked(key: Optional[str]) -> bool:
+    if not key:
+        return False
+    return "..." in key or key == "****" or key.startswith("***")
+
 @app.post("/api/settings")
 def update_settings(settings: ConnectionSettings):
+    if not is_masked(settings.gemini_api_key):
+        SETTINGS["gemini_api_key"] = settings.gemini_api_key
+        os.environ["GEMINI_API_KEY"] = settings.gemini_api_key or ""
+
+    if not is_masked(settings.groq_api_key):
+        SETTINGS["groq_api_key"] = settings.groq_api_key
+        os.environ["GROQ_API_KEY"] = settings.groq_api_key or ""
+
+    if not is_masked(settings.openrouter_api_key):
+        SETTINGS["openrouter_api_key"] = settings.openrouter_api_key
+        os.environ["OPENROUTER_API_KEY"] = settings.openrouter_api_key or ""
+
     SETTINGS["llm_provider"] = settings.llm_provider
-    SETTINGS["gemini_api_key"] = settings.gemini_api_key
+    SETTINGS["gemini_model"] = settings.gemini_model
+    SETTINGS["groq_model"] = settings.groq_model
+    SETTINGS["openrouter_model"] = settings.openrouter_model
     SETTINGS["ollama_model"] = settings.ollama_model
+    SETTINGS["enable_ollama_fallback"] = settings.enable_ollama_fallback
     SETTINGS["llm_call_budget"] = max(0, settings.llm_call_budget)
     
     os.environ["LLM_PROVIDER"] = settings.llm_provider
-    os.environ["GEMINI_API_KEY"] = settings.gemini_api_key
-    os.environ["OLLAMA_MODEL"] = settings.ollama_model
+    os.environ["GEMINI_MODEL"] = settings.gemini_model or "gemini-1.5-flash"
+    os.environ["GROQ_MODEL"] = settings.groq_model or "llama-3.3-70b-versatile"
+    os.environ["OPENROUTER_MODEL"] = settings.openrouter_model or "meta-llama/llama-3.1-8b-instruct:free"
+    os.environ["OLLAMA_MODEL"] = settings.ollama_model or "llama3"
+    os.environ["ENABLE_OLLAMA_FALLBACK"] = str(settings.enable_ollama_fallback).lower()
     os.environ["LLM_CALL_BUDGET"] = str(SETTINGS["llm_call_budget"])
     
     save_settings(SETTINGS)
@@ -587,10 +1008,67 @@ def update_settings(settings: ConnectionSettings):
 @app.get("/api/settings")
 def get_settings():
     return {
-        "llm_provider": SETTINGS.get("llm_provider", "gemini"),
-        "gemini_api_key": SETTINGS.get("gemini_api_key", ""),
+        "llm_provider": SETTINGS.get("llm_provider", "auto"),
+        "gemini_api_key": mask_api_key(SETTINGS.get("gemini_api_key", "")),
+        "gemini_model": SETTINGS.get("gemini_model", "gemini-1.5-flash"),
+        "groq_api_key": mask_api_key(SETTINGS.get("groq_api_key", "")),
+        "groq_model": SETTINGS.get("groq_model", "llama-3.3-70b-versatile"),
+        "openrouter_api_key": mask_api_key(SETTINGS.get("openrouter_api_key", "")),
+        "openrouter_model": SETTINGS.get("openrouter_model", "meta-llama/llama-3.1-8b-instruct:free"),
         "ollama_model": SETTINGS.get("ollama_model", "llama3"),
+        "enable_ollama_fallback": SETTINGS.get("enable_ollama_fallback", False),
         "llm_call_budget": SETTINGS.get("llm_call_budget", 50)
+    }
+
+@app.post("/api/test-connection")
+def test_connection(settings: Optional[ConnectionSettings] = None):
+    from backend.llm.llm_chain import (
+        query_gemini_provider, 
+        query_groq_provider, 
+        query_openrouter_provider, 
+        query_ollama_provider
+    )
+    s = settings.dict() if settings else SETTINGS
+    provider = (s.get("llm_provider") or "auto").lower()
+
+    test_prompt = "Respond with JSON: {\"status\": \"ok\"}"
+    results = []
+
+    # Test Groq if configured
+    groq_key = s.get("groq_api_key")
+    if groq_key:
+        code, msg = query_groq_provider(test_prompt, groq_key, s.get("groq_model"))
+        status = "PASS" if code == 200 and msg else f"FAIL ({code})"
+        results.append(f"Groq: {status}")
+
+    # Test OpenRouter if configured
+    openrouter_key = s.get("openrouter_api_key")
+    if openrouter_key:
+        code, msg = query_openrouter_provider(test_prompt, openrouter_key, s.get("openrouter_model"))
+        status = "PASS" if code == 200 and msg else f"FAIL ({code})"
+        results.append(f"OpenRouter: {status}")
+
+    # Test Gemini if configured
+    gemini_key = s.get("gemini_api_key")
+    if gemini_key:
+        code, msg = query_gemini_provider(test_prompt, gemini_key, s.get("gemini_model"))
+        status = "PASS" if code == 200 and msg else f"FAIL ({code})"
+        results.append(f"Gemini: {status}")
+
+    # Test Ollama
+    if s.get("enable_ollama_fallback") or provider == "ollama":
+        code, msg = query_ollama_provider(test_prompt, s.get("ollama_model"))
+        status = "PASS" if code == 200 and msg else f"FAIL ({code})"
+        results.append(f"Ollama: {status}")
+
+    if not results:
+        return {"status": "warning", "message": "No API keys configured to test."}
+
+    passed_count = sum(1 for r in results if "PASS" in r)
+    summary_status = "success" if passed_count > 0 else "error"
+    return {
+        "status": summary_status,
+        "message": f"Connection test complete ({passed_count}/{len(results)} active providers reachable). Details: " + " | ".join(results)
     }
 
 @app.post("/api/profile")
@@ -902,7 +1380,9 @@ def export_enriched_csv():
                 row.append(p["ref_url_4"] or "")
             elif h == "Ref URL 5":
                 row.append(p["ref_url_5"] or "")
-            elif h in ["PART_NUMBER", "Mfg_Part_Num", "MANUFACTURER_PART_NUMBER"]:
+            elif h == "PART_NUMBER":
+                row.append("") # Input dataset contains no internal SKU/PART_NUMBER column
+            elif h in ["Mfg_Part_Num", "MANUFACTURER_PART_NUMBER"]:
                 row.append(p["mfg_part_num"])
             elif h == "Product Name":
                 row.append(p["product_name"] or "")

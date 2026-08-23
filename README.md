@@ -50,31 +50,20 @@ cd ..
 
 ---
 
-## 🦙 Running with Local LLM (Ollama)
+## ⚡ Hosted Multi-Provider LLM Redundancy Chain (No GPU Required)
 
-This project has built-in support for **Ollama**, allowing you to run attribute extraction locally and privately without requiring external API keys.
+For production deployment on servers without local GPUs, the platform implements an automated multi-provider failover chain:
+**Google Gemini (Primary) → Groq Cloud (Fallback 1) → OpenRouter (Fallback 2)**
 
-### 1. Install Ollama
-Download and install Ollama for your operating system from the official website: [https://ollama.com](https://ollama.com).
+If the primary provider hits rate limits (`429`), authentication errors (`401`/`403`), or model errors (`404`), the pipeline seamlessly switches to the next provider in the chain without failing the product extraction job.
 
-### 2. Start the Ollama Server
-Make sure the Ollama desktop application is running, or run the serve command in a terminal:
-```powershell
-ollama serve
-```
+### 🔑 Obtaining Free API Keys
+- **Google Gemini**: Obtain a free key at [Google AI Studio](https://aistudio.google.com/app/apikey). Default model: `gemini-1.5-flash`
+- **Groq Cloud**: Obtain a free key at [Groq Console](https://console.groq.com/keys). Default model: `llama-3.3-70b-versatile`
+- **OpenRouter**: Obtain a free key at [OpenRouter Keys](https://openrouter.ai/keys). Default free model: `meta-llama/llama-3.1-8b-instruct:free`
 
-### 3. Pull the LLM Model
-By default, the application is configured to use the `llama3` model. Pull the model locally:
-```powershell
-ollama pull llama3
-```
-*Note: You can pull other models (e.g. `llama3.1`, `mistral`, `gemma2`) and change the model name in the settings panel of the web dashboard.*
-
-### 4. Optional Configurations
-If your Ollama server is running on a different port or host, you can set the `OLLAMA_BASE_URL` environment variable:
-```powershell
-$env:OLLAMA_BASE_URL="http://localhost:11434"
-```
+### 🦙 Optional Local LLM (Ollama Dev Fallback)
+For offline local development, you can optionally enable local **Ollama** as a dev fallback by setting `ENABLE_OLLAMA_FALLBACK=true` in settings or `.env`. Local Ollama is **not required** for production deployment.
 
 ---
 
@@ -111,12 +100,11 @@ npm run dev
 2. Select your catalog CSV (e.g., `Unihack_ Sample Dataset - Input.csv`).
 3. The platform parses the catalog, deduplicates on Manufacturer Part Number (`Mfg_Part_Num`), and loads the entries into the local database as `pending`.
 
-### Step 2: Configure LLM Provider
+### Step 2: Configure LLM Redundancy Chain
 1. Click on the **Settings** cog in the top-right of the dashboard.
-2. Select **Ollama** or **Gemini** as your LLM Provider.
-   - If using **Gemini**, input your Google Gemini API Key.
-   - If using **Ollama**, specify your local model name (e.g. `llama3`).
-3. Save settings.
+2. Select **Auto Failover Chain (Gemini → Groq → OpenRouter)** or explicitly select a single provider.
+3. Provide your API keys for Gemini, Groq, and OpenRouter.
+4. Save configuration and click **Test Provider Connectivity**.
 
 ### Step 3: Run Enrichment Pipeline
 - **Single Product**: Click on a product card, open its detail view, and click **Run Enrichment**.
