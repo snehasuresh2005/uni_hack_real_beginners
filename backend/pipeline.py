@@ -1480,10 +1480,6 @@ def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Automatically recover any orphaned 'processing' items back to 'pending'
-    cursor.execute("UPDATE products SET status = 'pending' WHERE status = 'processing'")
-    conn.commit()
-
     pending = cursor.execute(
         "SELECT id, mfg_part_num, part_desc, part_manuf, e1_brand, unilog_brand, dib_brand, mfr_url, product_image, specification_sheet, ref_url_1, ref_url_2, ref_url_3, ref_url_4, ref_url_5 FROM products WHERE status = 'pending' LIMIT ?", 
         (limit,)
