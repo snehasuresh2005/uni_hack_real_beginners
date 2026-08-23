@@ -168,16 +168,6 @@ def predict_domain(desc):
 
 def log_agent_action(cursor, product_id, agent_name, level, message):
     timestamp = datetime.now().isoformat()
-    
-    # Asynchronously execute database log write
-    def do_write(c):
-        c.execute(
-            "INSERT INTO agent_logs (product_id, agent_name, timestamp, message, level) VALUES (?, ?, ?, ?, ?)",
-            (product_id, agent_name, timestamp, message, level)
-        )
-    from backend.database import db_writer
-    db_writer.execute(do_write, wait=False)
-
     try:
         from backend.logs_broker import logs_broker
         logs_broker.publish({
@@ -187,8 +177,8 @@ def log_agent_action(cursor, product_id, agent_name, level, message):
             "message": message,
             "level": level
         })
-    except Exception as e:
-        print("Failed to publish log update to broker:", e)
+    except Exception:
+        pass
 
 def extract_regex_specs(desc, domain_id):
     attrs = {}
