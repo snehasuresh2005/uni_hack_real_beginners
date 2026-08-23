@@ -1108,19 +1108,19 @@ export default function App() {
 
         {/* --- INGESTION TAB --- */}
         {currentTab === 'ingestion' && (
-          <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '24px' }}>
-              <h2 className="panel-title"><UploadCloud size={20} color="#8b5cf6" /> Ingest Product Catalog</h2>
+          <div>
+            <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>Ingest Product Catalog</h1>
+                <p className="subtitle" style={{ margin: 0 }}>Select a raw industrial/distributor product catalog file to load pending items</p>
+              </div>
             </div>
-            
-            <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)', marginBottom: '20px' }}>
-              Select a raw industrial/distributor product catalog file to load pending items into the staging database.
-            </p>
 
-            <div 
-              style={{ border: '2px dashed var(--border-glass)', borderRadius: '8px', padding: '40px 20px', cursor: 'pointer', background: 'rgba(255,255,255,0.01)', textAlign: 'center' }}
-              onClick={() => fileInputRef.current.click()}
-            >
+            <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
+              <div 
+                style={{ border: '2px dashed var(--border-glass)', borderRadius: '8px', padding: '36px 20px', cursor: 'pointer', background: 'rgba(255,255,255,0.01)', textAlign: 'center' }}
+                onClick={() => fileInputRef.current.click()}
+              >
               <UploadCloud size={32} color="var(--primary)" style={{ marginBottom: '12px' }} />
               <p style={{ fontSize: '0.95rem', fontWeight: '600' }}>Select Catalog CSV File</p>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-dark)' }}>Only .csv files are supported</span>
@@ -1175,17 +1175,20 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
         )}
 
         {/* --- EXCEL PREVIEW / SPREADSHEET TAB --- */}
         {currentTab === 'preview' && (
-          <div className="glass-panel" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', margin: 0 }}>
-            <div className="panel-header" style={{ marginBottom: '20px' }}>
+          <div>
+            <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div>
-                <h2>Spreadsheet Excel Preview</h2>
+                <h1>Spreadsheet Excel Preview</h1>
                 <p className="subtitle" style={{ margin: 0 }}>Manual editor grid to check stage progress and override product specifications</p>
               </div>
             </div>
+
+            <div className="glass-panel" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', margin: 0 }}>
 
             {/* Filter controls */}
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
@@ -1278,6 +1281,7 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
         )}
 
         {/* --- CONFLICTS / HITL REVIEW TAB --- */}
@@ -1891,10 +1895,15 @@ export default function App() {
 
         {/* --- SETTINGS TAB --- */}
         {currentTab === 'settings' && (
-          <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
-            <div className="panel-header" style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '16px', marginBottom: '24px' }}>
-              <h2 className="panel-title"><SettingsIcon size={20} color="#8b5cf6" /> System Connection & LLM Redundancy Chain Settings</h2>
+          <div>
+            <div className="panel-header" style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h1>Connection Configs & Failover Chain</h1>
+                <p className="subtitle" style={{ margin: 0 }}>Manage API keys, model parameters, and active LLM provider strategy</p>
+              </div>
             </div>
+
+            <div className="glass-panel" style={{ width: '100%', margin: 0 }}>
 
             <div className="form-group" style={{ marginBottom: '20px' }}>
               <label className="form-label">Active Provider Selection Strategy</label>
@@ -2052,6 +2061,7 @@ export default function App() {
               </div>
             )}
           </div>
+        </div>
         )}
 
       </div>
