@@ -1098,27 +1098,41 @@ def run_pipeline_for_product(product_id, api_key=None, llm_provider="gemini", ol
     norm_mfr, norm_brd, fallback_path = resolve_brand_and_manufacturer(mfg_part_num, part_desc, part_manuf, brand_name)
     log_agent_action(None, product_id, "System", "SUCCESS", f"Normalized manufacturer to '{norm_mfr}', brand to '{norm_brd}' ({fallback_path or 'default'}).")
     
-    # Phase 3.5/8: url_enrichment
-    from backend.matching.mfr_url_resolver import resolve_product_urls
-    url_res = resolve_product_urls(norm_mfr, norm_brd, mfg_part_num, part_desc)
-    mfr_url_val = url_res.get("mfr_url", "")
-    ref_urls_list = url_res.get("ref_urls", [])
+    # Phase 3.5/8: url_enrichment (Decoupled Non-Blocking)
+    from backend.matching.mfr_url_resolver import get_manufacturer_domain, lookup_knowledge_cache, dispatch_async_mfr_resolution
+    cached_url_data = lookup_knowledge_cache(norm_mfr, mfg_part_num)
+    mfr_url_val = ""
+    ref_urls_list = []
+    pending_verif = 0
+
+    if cached_url_data and cached_url_data.get("web_urls"):
+        urls = cached_url_data["web_urls"]
+        mfr_url_val = urls[0] if urls else ""
+        ref_urls_list = urls[1:6] if len(urls) > 1 else []
+        pending_verif = 0
+    else:
+        domain = get_manufacturer_domain(norm_mfr, norm_brd)
+        if domain:
+            mfr_url_val = f"https://www.{domain}"
+        pending_verif = 1
+        dispatch_async_mfr_resolution(product_id, norm_mfr, norm_brd, mfg_part_num)
+
     ref_1 = ref_urls_list[0] if len(ref_urls_list) > 0 else ""
     ref_2 = ref_urls_list[1] if len(ref_urls_list) > 1 else ""
     ref_3 = ref_urls_list[2] if len(ref_urls_list) > 2 else ""
     ref_4 = ref_urls_list[3] if len(ref_urls_list) > 3 else ""
     ref_5 = ref_urls_list[4] if len(ref_urls_list) > 4 else ""
     
-    def write_urls(c, m_url, r1, r2, r3, r4, r5, p_id):
+    def write_urls(c, m_url, r1, r2, r3, r4, r5, p_verif, p_id):
         c.execute(
             """UPDATE products 
-               SET mfr_url = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ? 
+               SET mfr_url = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?, pending_verification = ? 
                WHERE id = ?""",
-            (m_url, r1, r2, r3, r4, r5, p_id)
+            (m_url, r1, r2, r3, r4, r5, p_verif, p_id)
         )
-    db_writer.execute(write_urls, mfr_url_val, ref_1, ref_2, ref_3, ref_4, ref_5, product_id, wait=True)
+    db_writer.execute(write_urls, mfr_url_val, ref_1, ref_2, ref_3, ref_4, ref_5, pending_verif, product_id, wait=False)
     if mfr_url_val:
-        log_agent_action(None, product_id, "System", "SUCCESS", f"Enriched MFR URL: {mfr_url_val} ({len(ref_urls_list)} Ref PDFs)")
+        log_agent_action(None, product_id, "System", "SUCCESS", f"Enriched MFR URL: {mfr_url_val} ({'Cached' if pending_verif == 0 else 'Pending Async Validation'})")
     
     # Phase 4/8: classify
     log_agent_action(None, product_id, "System", "INFO", "Phase 4/8: classify - Assessing product difficulty...")

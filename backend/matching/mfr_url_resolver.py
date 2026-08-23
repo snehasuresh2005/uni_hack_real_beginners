@@ -117,7 +117,7 @@ def construct_candidate_urls(mpn: str, domain: str) -> list:
         
     return candidates
 
-def validate_and_fetch_mfr_page(url_candidates: list, verified_domain: str, timeout: float = 2.0):
+def validate_and_fetch_mfr_page(url_candidates: list, verified_domain: str, timeout: float = 0.75):
     """
     Live validates URL candidates against HTTP status 200, checks final redirected domain,
     and ensures page path did not redirect to generic homepage or search landing page.
@@ -260,3 +260,32 @@ def resolve_product_urls(part_manuf: str, resolved_brand: str, mfg_part_num: str
 
 def resolved_manufacturer_fallback(mfr: str, brand: str) -> str:
     return mfr or brand or ""
+
+from concurrent.futures import ThreadPoolExecutor
+async_mfr_executor = ThreadPoolExecutor(max_workers=2)
+
+def dispatch_async_mfr_resolution(product_id: int, part_manuf: str, resolved_brand: str, mfg_part_num: str):
+    def run_verification():
+        try:
+            res = resolve_product_urls(part_manuf, resolved_brand, mfg_part_num)
+            m_url = res.get("mfr_url", "")
+            refs = res.get("ref_urls", [])
+            r1 = refs[0] if len(refs) > 0 else ""
+            r2 = refs[1] if len(refs) > 1 else ""
+            r3 = refs[2] if len(refs) > 2 else ""
+            r4 = refs[3] if len(refs) > 3 else ""
+            r5 = refs[4] if len(refs) > 4 else ""
+            
+            def write_async_urls(c, pid, url_val, u1, u2, u3, u4, u5):
+                c.execute(
+                    """UPDATE products 
+                       SET mfr_url = ?, ref_url_1 = ?, ref_url_2 = ?, ref_url_3 = ?, ref_url_4 = ?, ref_url_5 = ?, pending_verification = 0 
+                       WHERE id = ?""",
+                    (url_val, u1, u2, u3, u4, u5, pid)
+                )
+            from backend.database import db_writer
+            db_writer.execute(write_async_urls, product_id, m_url, r1, r2, r3, r4, r5, wait=False)
+        except Exception as err:
+            print(f"[Async MFR Resolution Error for Product {product_id}]:", err)
+
+    async_mfr_executor.submit(run_verification)

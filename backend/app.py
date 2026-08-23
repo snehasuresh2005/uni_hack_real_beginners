@@ -268,9 +268,9 @@ def clear_all_parsed_input():
 @app.post("/api/run-bulk")
 def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget: Optional[int] = None):
     global IS_BULK_RUNNING, SETTINGS
-    # Reset lock if stuck to allow user re-triggering smoothly
-    IS_BULK_RUNNING = False
-    
+    if IS_BULK_RUNNING:
+        return {"status": "processing", "message": "Bulk enrichment is already running in the background."}
+        
     # Reload fresh settings & reset provider cooldowns
     SETTINGS = load_settings()
     from backend.llm.llm_chain import reset_provider_cooldown
@@ -292,6 +292,7 @@ def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget
     
     def bulk_wrapper():
         global IS_BULK_RUNNING
+        IS_BULK_RUNNING = True
         try:
             while True:
                 processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 50, budget)

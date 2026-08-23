@@ -146,7 +146,8 @@ def init_db():
         "ref_url_1": "TEXT", "ref_url_2": "TEXT", "ref_url_3": "TEXT", "ref_url_4": "TEXT",
         "ref_url_5": "TEXT", "product_image": "TEXT", "specification_sheet": "TEXT",
         "fingerprint": "TEXT", "difficulty_level": "TEXT", "difficulty_score": "REAL",
-        "difficulty_reasons": "TEXT", "ai_drafted": "INTEGER DEFAULT 0"
+        "difficulty_reasons": "TEXT", "ai_drafted": "INTEGER DEFAULT 0",
+        "pending_verification": "INTEGER DEFAULT 0"
     }
     existing_columns = {row[1] for row in cursor.execute("PRAGMA table_info(products)")}
     for col, column_type in product_columns.items():
@@ -239,14 +240,42 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_pattern ON ai_knowledge_cache (pattern_key);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_manuf ON ai_knowledge_cache (part_manuf);")
 
-    # Audit data is useful, but unbounded prompt/response and event retention is not.
-    retention_days = int(os.environ.get("AUDIT_LOG_RETENTION_DAYS", "30"))
-    if retention_days >= 0:
-        cutoff = datetime.now().timestamp() - (retention_days * 86400)
-        cutoff_iso = datetime.fromtimestamp(cutoff).isoformat()
-        cursor.execute("DELETE FROM agent_logs WHERE timestamp < ?", (cutoff_iso,))
-        cursor.execute("DELETE FROM llm_calls WHERE timestamp < ?", (cutoff_iso,))
-    
+    # Auto-seed initial dataset if products table is empty (e.g. after ephemeral disk reset)
+    count = cursor.execute("SELECT COUNT(*) FROM products").fetchone()[0]
+    if count == 0:
+        csv_candidates = [
+            os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv"),
+            os.path.join(os.path.dirname(__file__), "..", "..", "Unihack_ Sample Dataset - Input.csv"),
+            "Unihack_ Sample Dataset - Input.csv"
+        ]
+        found_csv = None
+        for path in csv_candidates:
+            if os.path.exists(path):
+                found_csv = path
+                break
+        if found_csv:
+            try:
+                import pandas as pd
+                df = pd.read_csv(found_csv)
+                now = datetime.now().isoformat()
+                for _, row in df.iterrows():
+                    mpn = str(row["Mfg_Part_Num"])
+                    desc = str(row["Part_Desc"])
+                    e1 = str(row.get("E1_Brand", ""))
+                    unilog = str(row.get("Unilog_Brand", ""))
+                    dib = str(row.get("DIB_Brand", ""))
+                    manuf = str(row.get("Part_Manuf", ""))
+                    cursor.execute(
+                        """INSERT OR IGNORE INTO products 
+                        (mfg_part_num, part_desc, e1_brand, unilog_brand, dib_brand, part_manuf, status, created_at, updated_at) 
+                        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                        (mpn, desc, e1, unilog, dib, manuf, now, now)
+                    )
+                conn.commit()
+                print(f"Auto-seeded initial dataset from {os.path.basename(found_csv)}")
+            except Exception as seed_err:
+                print("Failed auto-seeding initial dataset:", seed_err)
+
     conn.commit()
     conn.close()
     print("Database initialized successfully at", DB_PATH)
