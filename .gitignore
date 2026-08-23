@@ -18,7 +18,7 @@ env/
 # Javascript / Node
 node_modules/
 .npm
-dist/
+!frontend/dist/
 .cache/
 
 # Databases
