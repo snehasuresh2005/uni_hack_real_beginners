@@ -54,7 +54,7 @@ body {
   background: var(--bg-gradient);
   color: var(--text-main);
   min-height: 100vh;
-  padding: 24px;
+  padding: 10px 14px;
   display: flex;
   justify-content: center;
   align-items: flex-start;
@@ -62,15 +62,15 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* App Outer Shell Wrapper - Soft Floating Rounded Dashboard Container */
+/* App Outer Shell Wrapper - Full-Width Floating Rounded Dashboard Container */
 .app-container {
   display: flex;
   width: 100%;
-  max-width: 1540px;
-  min-height: 92vh;
+  max-width: 100%;
+  min-height: 97vh;
   background: var(--app-bg);
-  border-radius: 32px;
-  box-shadow: 0 24px 60px -10px rgba(100, 110, 160, 0.15), 0 10px 25px -5px rgba(120, 130, 180, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 20px 50px -10px rgba(100, 110, 160, 0.12), 0 8px 20px -5px rgba(120, 130, 180, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.8);
   overflow: hidden;
   position: relative;
@@ -82,26 +82,26 @@ body {
   background: #18181b;
   display: flex;
   flex-direction: column;
-  height: calc(100% - 32px);
-  margin: 16px;
-  border-radius: 24px;
+  height: calc(100% - 24px);
+  margin: 12px;
+  border-radius: 20px;
   z-index: 100;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
   transition: all var(--transition-speed);
 }
 
 .sidebar-logo {
-  padding: 24px 20px 16px 20px;
+  padding: 20px 16px 12px 16px;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .logo-icon-bg {
-  width: 40px;
-  height: 40px;
+  width: 36px;
+  height: 36px;
   background: linear-gradient(135deg, #a78bfa 0%, #8b5cf6 100%);
-  border-radius: 12px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -110,7 +110,7 @@ body {
 }
 
 .logo-text {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 800;
   letter-spacing: -0.3px;
   color: #ffffff;
@@ -118,21 +118,21 @@ body {
 
 .sidebar-menu {
   list-style: none;
-  padding: 16px 12px;
+  padding: 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
   flex-grow: 1;
 }
 
 .menu-item {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 16px;
+  gap: 10px;
+  padding: 10px 14px;
   color: #a1a1aa;
   text-decoration: none;
-  font-size: 0.875rem;
+  font-size: 0.85rem;
   font-weight: 600;
   border-radius: var(--pill-radius);
   cursor: pointer;
@@ -153,8 +153,8 @@ body {
 }
 
 .sidebar-footer {
-  padding: 16px;
-  font-size: 0.75rem;
+  padding: 12px;
+  font-size: 0.725rem;
   color: #71717a;
   text-align: center;
 }
@@ -162,26 +162,26 @@ body {
 /* Main Content Canvas */
 .main-content {
   flex-grow: 1;
-  min-height: 92vh;
+  min-height: 97vh;
   display: flex;
   flex-direction: column;
-  padding: 28px 36px 36px 20px;
+  padding: 20px 28px 24px 16px;
   overflow-y: auto;
 }
 
 /* Page Headers & Titles */
 h1 {
-  font-size: 1.85rem;
+  font-size: 1.6rem;
   font-weight: 800;
   letter-spacing: -0.5px;
   color: var(--text-dark);
-  margin-bottom: 4px;
+  margin-bottom: 2px;
 }
 
 p.subtitle {
   color: var(--text-muted);
-  font-size: 0.925rem;
-  margin-bottom: 24px;
+  font-size: 0.875rem;
+  margin-bottom: 16px;
   font-weight: 500;
 }
 
@@ -190,9 +190,9 @@ p.subtitle {
   background: var(--panel-glass);
   border: 1px solid var(--panel-border);
   border-radius: var(--border-radius);
-  padding: 24px;
+  padding: 18px 20px;
   box-shadow: 0 8px 24px -4px rgba(100, 110, 160, 0.06);
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
 }
 
@@ -205,33 +205,39 @@ p.subtitle {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
 }
 
 .panel-title {
-  font-size: 1.15rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text-dark);
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   letter-spacing: -0.3px;
 }
 
-/* Dashboard Stats Grid - Soft Pastel Palette Fills */
+/* Dashboard Stats Grid - Single 4-Column Horizontal Row */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 18px;
-  margin-bottom: 24px;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 1100px) {
+  .stats-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .stat-card {
   border-radius: var(--border-radius);
-  padding: 20px;
+  padding: 14px 16px;
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 12px;
   border: 1px solid transparent;
   transition: transform var(--transition-speed), box-shadow var(--transition-speed);
 }
@@ -479,8 +485,8 @@ table.data-table tr:hover td {
 }
 
 .terminal-body {
-  padding: 18px;
-  height: 260px;
+  padding: 14px;
+  height: 170px;
   overflow-y: auto;
   font-size: 0.825rem;
   line-height: 1.6;
