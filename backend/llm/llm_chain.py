@@ -300,10 +300,14 @@ def query_llm_chain(prompt, product_id=None, reason="semantic extraction", setti
     gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
     
     groq_key = settings.get("groq_api_key") or os.environ.get("GROQ_API_KEY", "")
-    groq_model = settings.get("groq_model") or os.environ.get("GROQ_MODEL", "groq/compound")
+    groq_model = settings.get("groq_model") or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    if groq_model in ["gemma2-9b-it", "groq/compound"]:
+        groq_model = "llama-3.1-8b-instant"
     
     openrouter_key = settings.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY", "")
-    openrouter_model = settings.get("openrouter_model") or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+    openrouter_model = settings.get("openrouter_model") or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    if "llama-3.3-70b-instruct" in openrouter_model and not openrouter_model.endswith(":free"):
+        openrouter_model = "meta-llama/llama-3.1-8b-instruct:free"
     
     ollama_model = settings.get("ollama_model") or os.environ.get("OLLAMA_MODEL", "llama3")
 
