@@ -1343,13 +1343,13 @@ export default function App() {
                           const isThisBatchProcessing = processingBatchKey === batchKey;
 
                           return (
-                            <div key={batchKey} style={{ border: '1px solid rgba(139, 92, 246, 0.3)', borderRadius: '10px', background: 'rgba(15, 23, 42, 0.5)', padding: '12px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                            <div key={batchKey} style={{ border: '1px solid rgba(139, 92, 246, 0.25)', borderRadius: '10px', background: 'rgba(243, 232, 255, 0.5)', padding: '12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', paddingBottom: '8px', borderBottom: '1px solid rgba(139, 92, 246, 0.15)' }}>
                                 <div>
-                                  <div style={{ fontWeight: '700', fontSize: '0.85rem', color: '#c084fc', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                  <div style={{ fontWeight: '700', fontSize: '0.85rem', color: '#6b21a8', display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     🏷️ Brand Batch #{bIdx + 1}: {brandName}{subTitle}
                                   </div>
-                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                  <div style={{ fontSize: '0.72rem', color: '#475569', marginTop: '2px' }}>
                                     {items.length} item{items.length > 1 ? 's' : ''} in this batch (Max 3/prompt — Groq & Token Limit Safe)
                                   </div>
                                 </div>
@@ -1396,7 +1396,7 @@ export default function App() {
                                       fontWeight: '600',
                                       borderRadius: '6px',
                                       background: isThisBatchProcessing ? 'rgba(234, 179, 8, 0.2)' : 'rgba(139, 92, 246, 0.2)',
-                                      color: isThisBatchProcessing ? '#fde047' : '#c084fc',
+                                      color: isThisBatchProcessing ? '#a16207' : '#6b21a8',
                                       border: isThisBatchProcessing ? '1px solid rgba(234, 179, 8, 0.4)' : '1px solid rgba(139, 92, 246, 0.4)',
                                       cursor: processingBatchKey ? 'not-allowed' : 'pointer'
                                     }}
@@ -1427,7 +1427,7 @@ export default function App() {
                                       fontWeight: '600',
                                       borderRadius: '6px',
                                       background: 'rgba(34, 197, 94, 0.15)',
-                                      color: '#4ade80',
+                                      color: '#15803d',
                                       border: '1px solid rgba(34, 197, 94, 0.3)',
                                       cursor: 'pointer'
                                     }}
@@ -1448,22 +1448,22 @@ export default function App() {
                                     }}
                                     style={{
                                       padding: '8px 10px',
-                                      background: selectedConflictProduct?.product?.id === p.id ? 'var(--primary-glow)' : 'rgba(255,255,255,0.02)',
+                                      background: selectedConflictProduct?.product?.id === p.id ? '#f3e8ff' : '#ffffff',
                                       border: '1px solid',
-                                      borderColor: selectedConflictProduct?.product?.id === p.id ? 'var(--primary)' : 'rgba(255,255,255,0.05)',
+                                      borderColor: selectedConflictProduct?.product?.id === p.id ? 'var(--primary)' : 'rgba(226, 232, 240, 0.9)',
                                       borderRadius: '6px',
                                       cursor: 'pointer'
                                     }}
                                   >
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                      <div style={{ fontWeight: '700', color: 'var(--primary-hover)', fontSize: '0.8rem' }}>{p.mfg_part_num}</div>
+                                      <div style={{ fontWeight: '700', color: '#6d28d9', fontSize: '0.8rem' }}>{p.mfg_part_num}</div>
                                       {p.ai_drafted === 1 && (
-                                        <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(192, 132, 252, 0.2)', color: '#c084fc', border: '1px solid rgba(192, 132, 252, 0.4)', fontWeight: '600' }}>
+                                        <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: '4px', background: 'rgba(139, 92, 246, 0.15)', color: '#6b21a8', border: '1px solid rgba(139, 92, 246, 0.3)', fontWeight: '600' }}>
                                           ✨ AI Drafted — Review Needed
                                         </span>
                                       )}
                                     </div>
-                                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '2px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                                    <div style={{ fontSize: '0.75rem', color: '#334155', marginTop: '2px', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                                       {p.part_desc}
                                     </div>
                                   </div>
@@ -1498,11 +1498,11 @@ export default function App() {
                         <>
                           <div>
                             {isTaxonomyConflict ? (
-                              <span style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#c084fc', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                              <span style={{ background: 'rgba(139, 92, 246, 0.15)', color: '#6b21a8', border: '1px solid rgba(139, 92, 246, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
                                 📌 HITL Checkpoint #1: Taxonomy Review
                               </span>
                             ) : (
-                              <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
+                              <span style={{ background: 'rgba(59, 130, 246, 0.15)', color: '#1d4ed8', border: '1px solid rgba(59, 130, 246, 0.3)', padding: '4px 10px', borderRadius: '12px', fontSize: '0.75rem', fontWeight: '700', textTransform: 'uppercase' }}>
                                 ⚙️ HITL Checkpoint #2: Attribute/Enrichment Review
                               </span>
                             )}
@@ -1510,11 +1510,11 @@ export default function App() {
 
                           {warningLog && (
                             <div style={{
-                              background: 'rgba(239, 68, 68, 0.08)',
-                              border: '1px solid rgba(239, 68, 68, 0.25)',
+                              background: '#fef2f2',
+                              border: '1px solid #fca5a5',
                               borderRadius: '8px',
                               padding: '12px',
-                              color: '#f87171',
+                              color: '#991b1b',
                               fontSize: '0.85rem',
                               display: 'flex',
                               alignItems: 'start',
@@ -1533,23 +1533,23 @@ export default function App() {
                     {/* 🌐 Pre-AI Official Manufacturer Lookup (Token-Free Manual Verification) */}
                     {selectedConflictProduct && selectedConflictProduct.product && (
                       <div style={{
-                        background: 'linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, rgba(37, 99, 235, 0.04) 100%)',
-                        border: '1px solid rgba(59, 130, 246, 0.35)',
+                        background: '#eff6ff',
+                        border: '1px solid #93c5fd',
                         borderRadius: '10px',
                         padding: '14px',
                         marginBottom: '14px'
                       }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', color: '#60a5fa', fontSize: '0.85rem' }}>
-                            <Globe size={18} color="#60a5fa" />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: '700', color: '#1e40af', fontSize: '0.85rem' }}>
+                            <Globe size={18} color="#1e40af" />
                             <span>🌐 1-Click Official Manufacturer Lookup</span>
                           </div>
-                          <span style={{ fontSize: '0.7rem', background: 'rgba(59, 130, 246, 0.2)', color: '#93c5fd', padding: '2px 8px', borderRadius: '12px', fontWeight: '600' }}>
+                          <span style={{ fontSize: '0.7rem', background: 'rgba(59, 130, 246, 0.2)', color: '#1d4ed8', padding: '2px 8px', borderRadius: '12px', fontWeight: '600' }}>
                             ⚡ Zero Tokens / No AI Quota Used
                           </span>
                         </div>
 
-                        <div style={{ fontSize: '0.73rem', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: '1.4' }}>
+                        <div style={{ fontSize: '0.73rem', color: '#334155', marginBottom: '10px', lineHeight: '1.4' }}>
                           Verify specifications directly on the official manufacturer portal to reduce AI quota usage.
                         </div>
                         
