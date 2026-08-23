@@ -164,7 +164,7 @@ def query_gemini_provider(prompt, api_key=None, model_name=None, timeout=30):
     return (last_status, last_err)
 
 def query_groq_provider(prompt, api_key=None, model_name=None):
-    """Query Groq API endpoint with request spacing/throttling."""
+    """Query Groq API endpoint with request spacing and model fallbacks."""
     global LAST_GROQ_CALL_TIME
     if not api_key:
         api_key = os.environ.get("GROQ_API_KEY", "")
@@ -183,39 +183,74 @@ def query_groq_provider(prompt, api_key=None, model_name=None):
         print(f"[LLM Prompt Guard Warning] Prompt size ({len(prompt)} chars) exceeds Groq safe threshold ({GROQ_MAX_SAFE_PROMPT_CHARS} chars). Truncating payload...")
         prompt = prompt[:GROQ_MAX_SAFE_PROMPT_CHARS] + "\n[Truncated for Groq payload limits]"
 
-    model_name = model_name or os.environ.get("GROQ_MODEL", "groq/compound")
+    requested_model = model_name or os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    candidate_models = [requested_model]
+    for alt in ["llama-3.1-8b-instant", "llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
+
     url = "https://api.groq.com/openai/v1/chat/completions"
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 750
-    }
-    return query_openai_compatible_endpoint(url, payload, api_key)
+    last_status = 500
+    last_err = "Unknown Groq error"
+
+    for m_name in candidate_models:
+        payload = {
+            "model": m_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 512
+        }
+        status_code, result = query_openai_compatible_endpoint(url, payload, api_key)
+        if status_code == 200 and result:
+            return (200, result)
+        last_status = status_code
+        last_err = result
+
+    return (last_status, last_err)
 
 def query_openrouter_provider(prompt, api_key=None, model_name=None):
-    """Query OpenRouter API endpoint using a pinned instruct model."""
+    """Query OpenRouter API endpoint with automatic free model fallbacks."""
     if not api_key:
         api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         return (401, "No OpenRouter API key provided")
 
-    # Default to pinned high-quality instruct model unless configured
-    model_name = model_name or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+    requested_model = model_name or os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+    candidate_models = [requested_model]
+    for alt in [
+        "meta-llama/llama-3.1-8b-instruct:free",
+        "google/gemma-2-9b-it:free",
+        "qwen/qwen-2.5-72b-instruct:free",
+        "deepseek/deepseek-r1:free",
+        "meta-llama/llama-3.3-70b-instruct:free"
+    ]:
+        if alt not in candidate_models:
+            candidate_models.append(alt)
 
     url = "https://openrouter.ai/api/v1/chat/completions"
-    payload = {
-        "model": model_name,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.1,
-        "max_tokens": 1536,
-        "reasoning": {"enabled": False}  # Explicitly suppress reasoning tokens
-    }
     extra_headers = {
         "HTTP-Referer": "https://github.com/unihack-real-beginners",
         "X-Title": "B2B Product Intelligence"
     }
-    return query_openai_compatible_endpoint(url, payload, api_key, extra_headers=extra_headers)
+
+    last_status = 500
+    last_err = "Unknown OpenRouter error"
+
+    for m_name in candidate_models:
+        payload = {
+            "model": m_name,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 512,
+            "reasoning": {"enabled": False}
+        }
+        status_code, result = query_openai_compatible_endpoint(url, payload, api_key, extra_headers=extra_headers)
+        if status_code == 200 and result:
+            return (200, result)
+        last_status = status_code
+        last_err = result
+
+    return (last_status, last_err)
 
 def query_ollama_provider(prompt, model_name=None):
     """Query local Ollama instance if available."""
