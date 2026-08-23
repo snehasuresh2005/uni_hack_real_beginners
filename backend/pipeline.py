@@ -1476,13 +1476,12 @@ def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama
         "SELECT id, mfg_part_num, part_desc, part_manuf, e1_brand, unilog_brand, dib_brand, mfr_url, product_image, specification_sheet, ref_url_1, ref_url_2, ref_url_3, ref_url_4, ref_url_5 FROM products WHERE status = 'pending' LIMIT ?", 
         (limit,)
     ).fetchall()
-    conn.close()
     
     if not pending:
         conn.close()
         return 0
 
-    # Immediately mark selected batch items as 'processing' in DB to reflect instant UI progress
+    # Mark selected batch items as 'processing' in DB
     product_ids = [row["id"] for row in pending]
     placeholders = ",".join("?" * len(product_ids))
     cursor.execute(f"UPDATE products SET status = 'processing' WHERE id IN ({placeholders})", product_ids)
