@@ -240,45 +240,6 @@ def init_db():
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_pattern ON ai_knowledge_cache (pattern_key);")
     cursor.execute("CREATE INDEX IF NOT EXISTS idx_ai_knowledge_cache_manuf ON ai_knowledge_cache (part_manuf);")
 
-    # Auto-seed initial dataset if products table is empty (e.g. after ephemeral disk reset)
-    count = cursor.execute("SELECT COUNT(*) FROM products").fetchone()[0]
-    if count == 0:
-        csv_candidates = [
-            os.path.join(os.path.dirname(__file__), "..", "Unihack_Sample_Dataset_200.csv"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "Unihack_Sample_Dataset_200.csv"),
-            "Unihack_Sample_Dataset_200.csv",
-            os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv"),
-            os.path.join(os.path.dirname(__file__), "..", "..", "Unihack_ Sample Dataset - Input.csv"),
-            "Unihack_ Sample Dataset - Input.csv"
-        ]
-        found_csv = None
-        for path in csv_candidates:
-            if os.path.exists(path):
-                found_csv = path
-                break
-        if found_csv:
-            try:
-                import pandas as pd
-                df = pd.read_csv(found_csv)
-                now = datetime.now().isoformat()
-                for _, row in df.iterrows():
-                    mpn = str(row["Mfg_Part_Num"])
-                    desc = str(row["Part_Desc"])
-                    e1 = str(row.get("E1_Brand", ""))
-                    unilog = str(row.get("Unilog_Brand", ""))
-                    dib = str(row.get("DIB_Brand", ""))
-                    manuf = str(row.get("Part_Manuf", ""))
-                    cursor.execute(
-                        """INSERT OR IGNORE INTO products 
-                        (mfg_part_num, part_desc, e1_brand, unilog_brand, dib_brand, part_manuf, status, created_at, updated_at) 
-                        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
-                        (mpn, desc, e1, unilog, dib, manuf, now, now)
-                    )
-                conn.commit()
-                print(f"Auto-seeded initial dataset from {os.path.basename(found_csv)}")
-            except Exception as seed_err:
-                print("Failed auto-seeding initial dataset:", seed_err)
-
     conn.commit()
     conn.close()
     print("Database initialized successfully at", DB_PATH)

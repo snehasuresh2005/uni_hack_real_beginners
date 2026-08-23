@@ -238,43 +238,11 @@ def clear_all_parsed_input():
     cursor.execute("DELETE FROM attributes")
     cursor.execute("DELETE FROM agent_logs")
     cursor.execute("DELETE FROM conflicts")
+    cursor.execute("DELETE FROM llm_calls")
     conn.commit()
-
-    import pandas as pd
-    from datetime import datetime
-    csv_candidates = [
-        os.path.join(os.path.dirname(__file__), "..", "Unihack_Sample_Dataset_200.csv"),
-        "Unihack_Sample_Dataset_200.csv",
-        os.path.join(os.path.dirname(__file__), "..", "Unihack_ Sample Dataset - Input.csv"),
-        "Unihack_ Sample Dataset - Input.csv"
-    ]
-    input_csv = None
-    for path in csv_candidates:
-        if os.path.exists(path):
-            input_csv = path
-            break
-
-    reloaded_count = 0
-    if input_csv:
-        df = pd.read_csv(input_csv)
-        now = datetime.now().isoformat()
-        for _, row in df.iterrows():
-            mpn = str(row["Mfg_Part_Num"])
-            desc = str(row["Part_Desc"])
-            e1 = str(row.get("E1_Brand", ""))
-            unilog = str(row.get("Unilog_Brand", ""))
-            dib = str(row.get("DIB_Brand", ""))
-            manuf = str(row.get("Part_Manuf", ""))
-            cursor.execute("""
-                INSERT OR IGNORE INTO products 
-                (mfg_part_num, part_desc, e1_brand, unilog_brand, dib_brand, part_manuf, status, ai_drafted, created_at, updated_at) 
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?)
-            """, (mpn, desc, e1, unilog, dib, manuf, now, now))
-            reloaded_count += 1
-        conn.commit()
-
     conn.close()
-    return {"status": "ok", "message": f"Cleared all parsed input and reloaded {reloaded_count} pending items."}
+
+    return {"status": "success", "imported": 0, "message": "All product data cleared successfully. Database reset to 0 products."}
 
 @app.post("/api/run-bulk")
 def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget: Optional[int] = None):
