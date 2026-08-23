@@ -184,10 +184,10 @@ def query_groq_provider(prompt, api_key=None, model_name=None):
         prompt = prompt[:GROQ_MAX_SAFE_PROMPT_CHARS] + "\n[Truncated for Groq payload limits]"
 
     requested_model = model_name or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
-    if requested_model in ["llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"]:
+    if requested_model in ["llama-3.1-8b-instant", "llama3-8b-8192", "llama3-70b-8192", "mixtral-8x7b-32768", "gemma2-9b-it", "groq/compound"]:
         requested_model = "llama-3.3-70b-versatile"
     candidate_models = [requested_model]
-    for alt in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
+    for alt in ["llama-3.3-70b-versatile"]:
         if alt not in candidate_models:
             candidate_models.append(alt)
 
@@ -218,11 +218,11 @@ def query_openrouter_provider(prompt, api_key=None, model_name=None):
         return (401, "No OpenRouter API key provided")
 
     requested_model = model_name or os.environ.get("OPENROUTER_MODEL", "openrouter/auto")
-    if requested_model in ["google/gemma-4-31b-it:free", "google/gemma-2-9b-it:free", "meta-llama/llama-3.1-8b-instruct:free"]:
+    if requested_model in ["deepseek/deepseek-r1:free", "google/gemma-4-31b-it:free", "google/gemma-2-9b-it:free", "meta-llama/llama-3.1-8b-instruct:free", "meta-llama/llama-3.3-70b-instruct"]:
         requested_model = "openrouter/auto"
 
     candidate_models = [requested_model]
-    for alt in ["openrouter/auto", "deepseek/deepseek-r1:free", "meta-llama/llama-3.3-70b-instruct:free"]:
+    for alt in ["openrouter/auto"]:
         if alt not in candidate_models:
             candidate_models.append(alt)
 
