@@ -847,8 +847,18 @@ export default function App() {
               <Trash2 size={16} /> Clear All Parsed Input
             </button>
             {currentStage === 2 && (
-              <button className="btn btn-primary" onClick={handleRunBulkEnrichment} disabled={isBulkProcessing || stats.processing > 0}>
-                <Play size={16} /> {isBulkProcessing || stats.processing > 0 ? "Enriching Products..." : "Run Catalog Enrichment (Max 30 - Demo Cap)"}
+              <button 
+                className="btn" 
+                onClick={handleRunBulkEnrichment} 
+                style={{ 
+                  background: isBulkProcessing ? '#7c3aed' : 'var(--primary)', 
+                  color: '#ffffff',
+                  boxShadow: '0 4px 14px rgba(139, 92, 246, 0.35)',
+                  fontWeight: '700',
+                  cursor: isBulkProcessing ? 'wait' : 'pointer'
+                }}
+              >
+                <Play size={16} /> {isBulkProcessing ? "Enriching Products..." : "Run Catalog Enrichment (Max 30 - Demo Cap)"}
               </button>
             )}
             {currentStage === 3 && (
