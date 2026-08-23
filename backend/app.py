@@ -266,22 +266,27 @@ def clear_all_parsed_input():
 
 @app.post("/api/run-bulk")
 def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget: Optional[int] = None):
-    global IS_BULK_RUNNING
+    global IS_BULK_RUNNING, SETTINGS
     # Reset lock if stuck to allow user re-triggering smoothly
     IS_BULK_RUNNING = False
+    
+    # Reload fresh settings & reset provider cooldowns
+    SETTINGS = load_settings()
+    from backend.llm.llm_chain import reset_provider_cooldown
+    reset_provider_cooldown()
         
     key = SETTINGS.get("gemini_api_key")
-    provider = SETTINGS.get("llm_provider", "gemini")
+    provider = SETTINGS.get("llm_provider", "auto")
     model = SETTINGS.get("ollama_model", "llama3")
-    budget = SETTINGS.get("llm_call_budget", 10000) if llm_call_budget is None else llm_call_budget
+    budget = SETTINGS.get("llm_call_budget", 50) if llm_call_budget is None else llm_call_budget
     
     def bulk_wrapper():
         global IS_BULK_RUNNING
         try:
-            while True:
-                processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 30, budget)
-                if processed == 0:
-                    break
+            processed = run_bulk_enrichment(key, provider, model, limit if limit > 0 else 30, budget)
+            print(f"[Bulk Pipeline] Completed enrichment batch. Processed: {processed} products.")
+        except Exception as err:
+            print(f"[Bulk Pipeline Error] Exception during enrichment: {err}")
         finally:
             IS_BULK_RUNNING = False
             
