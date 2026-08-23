@@ -275,6 +275,15 @@ def run_bulk(background_tasks: BackgroundTasks, limit: int = 30, llm_call_budget
     SETTINGS = load_settings()
     from backend.llm.llm_chain import reset_provider_cooldown
     reset_provider_cooldown()
+
+    # Recover any orphaned processing items back to pending state
+    try:
+        conn = get_db_connection()
+        conn.execute("UPDATE products SET status = 'pending' WHERE status = 'processing'")
+        conn.commit()
+        conn.close()
+    except Exception as db_err:
+        print("[Run-Bulk Recovery Warning]:", db_err)
         
     key = SETTINGS.get("gemini_api_key")
     provider = SETTINGS.get("llm_provider", "auto")

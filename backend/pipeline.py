@@ -1464,6 +1464,13 @@ def enrich_taxonomy_batch_with_llm(batch, api_key=None, llm_provider="gemini", o
                 success_count += 1
         except Exception as e:
             print(f"Error running pipeline for product {p['id']} in taxonomy batch:", e)
+            try:
+                from backend.database import db_writer
+                def mark_failed_product(c, pid):
+                    c.execute("UPDATE products SET status = 'flagged_hitl' WHERE id = ?", (pid,))
+                db_writer.execute(mark_failed_product, p["id"], wait=True)
+            except Exception:
+                pass
             
     return success_count
 
@@ -1472,6 +1479,11 @@ def run_bulk_enrichment(api_key=None, llm_provider="gemini", ollama_model="llama
     llm_budget = LlmBudget(llm_call_budget)
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # Automatically recover any orphaned 'processing' items back to 'pending'
+    cursor.execute("UPDATE products SET status = 'pending' WHERE status = 'processing'")
+    conn.commit()
+
     pending = cursor.execute(
         "SELECT id, mfg_part_num, part_desc, part_manuf, e1_brand, unilog_brand, dib_brand, mfr_url, product_image, specification_sheet, ref_url_1, ref_url_2, ref_url_3, ref_url_4, ref_url_5 FROM products WHERE status = 'pending' LIMIT ?", 
         (limit,)
