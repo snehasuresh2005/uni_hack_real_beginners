@@ -92,21 +92,21 @@ def query_openai_compatible_endpoint(url, payload, api_key, extra_headers=None, 
     except Exception as e:
         return (500, f"Request error: {str(e)}")
 
-def query_gemini_provider(prompt, api_key=None, model_name=None, timeout=5):
+def query_gemini_provider(prompt, api_key=None, model_name=None, timeout=8):
     """Query Google Gemini API directly via REST endpoint with retry and model fallback."""
     if not api_key:
         api_key = os.environ.get("GEMINI_API_KEY", "")
     if not api_key:
         return (401, "No Gemini API key provided")
         
-    requested_model = model_name or os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+    requested_model = model_name or os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
     if requested_model.startswith("models/"):
         requested_model = requested_model[7:]
-    if requested_model in ["gemini-1.5-flash", "gemini-2.5-flash"]:
-        requested_model = "gemini-3.5-flash"
+    if requested_model in ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"]:
+        requested_model = "gemini-1.5-flash"
 
     candidate_models = [requested_model]
-    for alt in ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-flash-latest", "gemini-3.6-flash", "gemini-3.7-flash"]:
+    for alt in ["gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]:
         if alt not in candidate_models:
             candidate_models.append(alt)
 
@@ -215,14 +215,13 @@ def query_openrouter_provider(prompt, api_key=None, model_name=None):
     if not api_key:
         return (401, "No OpenRouter API key provided")
 
-    requested_model = model_name or os.environ.get("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
+    requested_model = model_name or os.environ.get("OPENROUTER_MODEL", "google/gemma-2-9b-it:free")
     candidate_models = [requested_model]
     for alt in [
-        "google/gemma-4-31b-it:free",
-        "google/gemma-4-26b-a4b-it:free",
-        "nvidia/nemotron-3-nano-30b-a3b:free",
-        "nvidia/nemotron-3.5-lightning:free",
-        "dots-studio/dots-3-note-preview:free"
+        "google/gemma-2-9b-it:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen-2.5-72b-instruct:free",
+        "deepseek/deepseek-r1:free"
     ]:
         if alt not in candidate_models:
             candidate_models.append(alt)
@@ -301,16 +300,18 @@ def query_llm_chain(prompt, product_id=None, reason="semantic extraction", setti
         chain = [p for p in chain if p != "ollama"]
 
     gemini_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY", "")
-    gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+    gemini_model = settings.get("gemini_model") or os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+    if gemini_model in ["gemini-3.5-flash", "gemini-2.5-flash", "gemini-flash-latest"]:
+        gemini_model = "gemini-1.5-flash"
     
     groq_model = settings.get("groq_model") or os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
     if groq_model in ["gemma2-9b-it", "groq/compound"]:
         groq_model = "llama-3.3-70b-versatile"
     
     openrouter_key = settings.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY", "")
-    openrouter_model = settings.get("openrouter_model") or os.environ.get("OPENROUTER_MODEL", "google/gemma-4-31b-it:free")
-    if "llama-3.1-8b-instruct" in openrouter_model or "gemma2-9b-it" in openrouter_model:
-        openrouter_model = "google/gemma-4-31b-it:free"
+    openrouter_model = settings.get("openrouter_model") or os.environ.get("OPENROUTER_MODEL", "google/gemma-2-9b-it:free")
+    if "llama-3.1-8b-instruct" in openrouter_model or "gemma2-9b-it" in openrouter_model or "gemma-4" in openrouter_model:
+        openrouter_model = "google/gemma-2-9b-it:free"
     
     ollama_model = settings.get("ollama_model") or os.environ.get("OLLAMA_MODEL", "llama3")
 
